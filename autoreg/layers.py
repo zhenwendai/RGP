@@ -34,19 +34,12 @@ class Layer(SparseGP):
         else:
             self.Y = NormalPosterior(X.mean.values[X_win-1:].copy(),X.variance.values[X_win-1:].copy())
         N = self.Y.shape[0]
+        self._update_conv()
         if not self.withControl:
-            self.X_mean_conv = get_conv_1D(self.X_flat.mean.values, X_win).reshape(N,-1)
-            self.X_var_conv = get_conv_1D(self.X_flat.variance.values, X_win).reshape(N,-1)
             self.X = NormalPosterior(self.X_mean_conv.copy(),self.X_var_conv.copy())
         elif X_win==1:
-            self.U_mean_conv = get_conv_1D(self.U_flat.mean.values[-N-U_win+1:], U_win).reshape(N,-1)
-            self.U_var_conv = get_conv_1D(self.U_flat.variance.values[-N-U_win+1:], U_win).reshape(N,-1)
             self.X = NormalPosterior(self.U_mean_conv.copy(),self.U_var_conv.copy())
         else:
-            self.X_mean_conv = get_conv_1D(self.X_flat.mean.values, X_win).reshape(N,-1)
-            self.X_var_conv = get_conv_1D(self.X_flat.variance.values, X_win).reshape(N,-1)
-            self.U_mean_conv = get_conv_1D(self.U_flat.mean.values[-N-U_win+1:], U_win).reshape(N,-1)
-            self.U_var_conv = get_conv_1D(self.U_flat.variance.values[-N-U_win+1:], U_win).reshape(N,-1)
             self.X = NormalPosterior(np.hstack([self.X_mean_conv.copy(),self.U_mean_conv.copy()]),
                                      np.hstack([self.X_var_conv.copy().copy(),self.U_var_conv.copy()]))
         
@@ -78,27 +71,33 @@ class Layer(SparseGP):
                 resolution, ax, marker, s,
                 fignum, plot_inducing, legend,
                 plot_limits, aspect, updates, predict_kwargs, imshow_kwargs)
-        
-    def _update_X(self):
+
+    def _update_conv(self):
         N = self.Y.shape[0]
+        if not self.withControl:
+            self.X_mean_conv = get_conv_1D(self.X_flat.mean.values[:-1], self.X_win-1).reshape(N,-1)
+            self.X_var_conv = get_conv_1D(self.X_flat.variance.values[:-1], self.X_win-1).reshape(N,-1)
+        elif self.X_win==1:
+            self.U_mean_conv = get_conv_1D(self.U_flat.mean.values[-N-self.U_win+1:], self.U_win).reshape(N,-1)
+            self.U_var_conv = get_conv_1D(self.U_flat.variance.values[-N-self.U_win+1:], self.U_win).reshape(N,-1)
+        else:
+            self.X_mean_conv = get_conv_1D(self.X_flat.mean.values[:-1], self.X_win-1).reshape(N,-1)
+            self.X_var_conv = get_conv_1D(self.X_flat.variance.values[:-1], self.X_win-1).reshape(N,-1)
+            self.U_mean_conv = get_conv_1D(self.U_flat.mean.values[-N-self.U_win+1:], self.U_win).reshape(N,-1)
+            self.U_var_conv = get_conv_1D(self.U_flat.variance.values[-N-self.U_win+1:], self.U_win).reshape(N,-1)
+    
+    def _update_X(self):
+        self._update_conv()
         if not self.X_observed:
             self.Y.mean[:] = self.X_flat.mean[self.X_win-1:]
             self.Y.variance[:] = self.X_flat.variance[self.X_win-1:]
         if not self.withControl:
-            self.X_mean_conv = get_conv_1D(self.X_flat.mean.values, self.X_win).reshape(N,-1)
-            self.X_var_conv = get_conv_1D(self.X_flat.variance.values, self.X_win).reshape(N,-1)
             self.X.mean[:] = self.X_mean_conv
             self.X.variance[:] = self.X_var_conv
         elif self.X_win==1:
-            self.U_mean_conv = get_conv_1D(self.U_flat.mean.values[-N-self.U_win+1:], self.U_win).reshape(N,-1)
-            self.U_var_conv = get_conv_1D(self.U_flat.variance.values[-N-self.U_win+1:], self.U_win).reshape(N,-1)
             self.X.mean[:] = self.U_mean_conv
             self.X.variance[:] = self.U_var_conv
         else:
-            self.X_mean_conv = get_conv_1D(self.X_flat.mean.values, self.X_win).reshape(N,-1)
-            self.X_var_conv = get_conv_1D(self.X_flat.variance.values, self.X_win).reshape(N,-1)
-            self.U_mean_conv = get_conv_1D(self.U_flat.mean.values[-N-self.U_win+1:], self.U_win).reshape(N,-1)
-            self.U_var_conv = get_conv_1D(self.U_flat.variance.values[-N-self.U_win+1:], self.U_win).reshape(N,-1)
             self.X.mean[:,:self.X_mean_conv.shape[1]] = self.X_mean_conv
             self.X.variance[:,:self.X_mean_conv.shape[1]] = self.X_var_conv
             self.X.mean[:,self.X_mean_conv.shape[1]:] = self.U_mean_conv
@@ -108,16 +107,16 @@ class Layer(SparseGP):
         N = self.Y.shape[0]
         for n in xrange(self.X.shape[0]):
             if not self.withControl:
-                self.X_flat.mean.gradient[n:n+self.X_win] += self.X.mean.gradient[n].reshape(-1,self.Q_dim)
-                self.X_flat.variance.gradient[n:n+self.X_win] += self.X.variance.gradient[n].reshape(-1,self.Q_dim)
+                self.X_flat.mean.gradient[n:n+self.X_win-1] += self.X.mean.gradient[n].reshape(-1,self.Q_dim)
+                self.X_flat.variance.gradient[n:n+self.X_win-1] += self.X.variance.gradient[n].reshape(-1,self.Q_dim)
             elif self.X_win==1:
                 offset = -N-self.U_win+1+self.U_flat.shape[0]
                 self.U_flat.mean.gradient[offset+n:offset+n+self.U_win] += self.X.mean.gradient[n].reshape(-1,self.Q_dim)
                 self.U_flat.variance.gradient[offset+n:offset+n+self.U_win] += self.X.variance.gradient[n].reshape(-1,self.Q_dim)
             else:
                 offset = -N-self.U_win+1+self.U_flat.shape[0]
-                self.X_flat.mean.gradient[n:n+self.X_win] += self.X.mean.gradient[n,:self.X_mean_conv.shape[1]].reshape(-1,self.Q_dim)
-                self.X_flat.variance.gradient[n:n+self.X_win] += self.X.variance.gradient[n,:self.X_mean_conv.shape[1]].reshape(-1,self.Q_dim)
+                self.X_flat.mean.gradient[n:n+self.X_win-1] += self.X.mean.gradient[n,:self.X_mean_conv.shape[1]].reshape(-1,self.Q_dim)
+                self.X_flat.variance.gradient[n:n+self.X_win-1] += self.X.variance.gradient[n,:self.X_mean_conv.shape[1]].reshape(-1,self.Q_dim)
                 self.U_flat.mean.gradient[offset+n:offset+n+self.U_win] += self.X.mean.gradient[n,self.X_mean_conv.shape[1]:].reshape(-1,self.Q_dim)
                 self.U_flat.variance.gradient[offset+n:offset+n+self.U_win] += self.X.variance.gradient[n,self.X_mean_conv.shape[1]:].reshape(-1,self.Q_dim)
     

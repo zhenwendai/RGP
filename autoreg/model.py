@@ -22,8 +22,11 @@ class DeepAutoreg(Model):
         self.Y = Y
         self.U = U
         self.U_win = U_win
-        if self.U is not None: assert Y.shape[0]==U.shape[0] - U_win+1
-        
+        if self.U is not None: 
+            assert Y.shape[0]==U.shape[0] - U_win+1
+            self.U = NormalPosterior(U.copy(),np.ones(U.shape))
+            self.U.variance[:] = 1e-10
+
         self.Xs = self._init_X(wins, Y, U, X_variance)
         
         # Parameters which exist differently per layer but specified as single componenents are here expanded to each layer
@@ -33,11 +36,11 @@ class DeepAutoreg(Model):
         self.layers = []
         for i in range(self.nLayers-1,-1,-1):
             if i==self.nLayers-1:
-                self.layers.append(Layer(None, self.Xs[i-1], X_win=wins[i], U=None, U_win=U_win, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i)))
+                self.layers.append(Layer(None, self.Xs[i-1], X_win=wins[i], U=self.U, U_win=U_win, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i)))
             elif i==0:
-                self.layers.append(Layer(self.layers[-1], Y, X_win=wins[i], U=self.Xs[i], U_win=wins[i+1], num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, likelihood=likelihood, noise_var=1., name='layer_'+str(i)))
+                self.layers.append(Layer(self.layers[-1], Y, X_win=wins[i], U=self.Xs[i], U_win=wins[i+1]-1, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, likelihood=likelihood, noise_var=1., name='layer_'+str(i)))
             else:
-                self.layers.append(Layer(self.layers[-1], self.Xs[i-1], X_win=wins[i], U=self.Xs[i], U_win=wins[i+1], num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i)))
+                self.layers.append(Layer(self.layers[-1], self.Xs[i-1], X_win=wins[i], U=self.Xs[i], U_win=wins[i+1]-1, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i)))
         self.layers[0].set_as_toplayer()
         self.link_parameters(*self.layers)
             
@@ -57,3 +60,32 @@ class DeepAutoreg(Model):
     def parameters_changed(self):
         self._log_marginal_likelihood = np.sum([l._log_marginal_likelihood for l in self.layers])
         [l.update_latent_gradients() for l in self.layers[::-1]]
+        
+    def freerun(self, init_Xs, step=100, U=None):
+        Xs = []
+        con = U
+        con_win = self.layers[0].U_win-1
+        for i in range(self.nLayers):
+            layer = self.layers[i]
+            X_win,U_win = layer.X_win, layer.U_win
+            con = con[con_win-U_win+1:]
+            if X_win>1:
+                X = np.empty((init_Xs[i].shape[0]+step,layer.X_flat.shape[1]))
+                X[:init_Xs[i].shape[0]] = init_Xs[i]
+                X_in = np.empty((1,layer.X.mean.shape[1]))
+                for n in range(step):
+                    X_in[0,:X_win-1] = X[n:n+X_win-1].flat
+                    if layer.withControl: X_in[0,X_win-1:] = con[n:n+U_win].flat
+                    X[layer.X_win-1+n] = layer._raw_predict(X_in)[0]
+            else:
+                X = np.empty((step,layer.X_flat.shape[1]))
+                X_in = np.empty((1,layer.X.mean.shape[1]))
+                for n in range(step):
+                    if layer.withControl: X_in[0,X_win-1:] = con[n:n+U_win].flat
+                    X[layer.X_win-1+n] = layer._raw_predict(X_in)[0]
+            Xs.append(X)
+            con = X
+            con_win = X_win-1
+        return con
+        
+        
