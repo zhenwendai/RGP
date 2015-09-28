@@ -8,24 +8,35 @@ from GPy.core.parameterization.variational import VariationalPosterior,\
 from .layers import Layer
 
 class DeepAutoreg(Model):
+    """
+    :param U_pre_step: If true, the current signal is assumed to be controlled by the control signal of the previous time step.
+    :type U_pre_step: Boolean
+    """
     
-    def __init__(self, wins, Y, U=None, U_win=1, X_variance=0.01, num_inducing=10, likelihood = None, name='autoreg', kernels=None ):
+    def __init__(self, wins, Y, U=None, U_win=1, X_variance=0.01, num_inducing=10, likelihood = None, name='autoreg', kernels=None, U_pre_step=True):
         super(DeepAutoreg, self).__init__(name=name)
         
         self.nLayers = len(wins)
-        self.wins = wins
+        self.wins = wins = [i+1 for i in wins]
         self.input_dim = 1
         self.output_dim = 1
-        
         self._log_marginal_likelihood = np.nan
+        self.U_pre_step = U_pre_step
         
-        self.Y = Y
-        self.U = U
-        self.U_win = U_win
-        if self.U is not None: 
-            assert Y.shape[0]==U.shape[0] - U_win+1
+        
+        if U is not None:
+            assert Y.shape[0]==U.shape[0], "the signal and control should be aligned."
+            if U_pre_step:
+                U = U[:-1].copy()
+                Y = Y[U_win:].copy()
+            else:
+                Y = Y[U_win-1:].copy()
             self.U = NormalPosterior(U.copy(),np.ones(U.shape))
             self.U.variance[:] = 1e-10
+        else:
+            self.U = U
+        self.Y = Y
+        self.U_win = U_win
 
         self.Xs = self._init_X(wins, Y, U, X_variance)
         
@@ -61,7 +72,12 @@ class DeepAutoreg(Model):
         self._log_marginal_likelihood = np.sum([l._log_marginal_likelihood for l in self.layers])
         [l.update_latent_gradients() for l in self.layers[::-1]]
         
-    def freerun(self, init_Xs, step=100, U=None):
+    def freerun(self, init_Xs=None, step=None, U=None):
+        assert self.U_pre_step, "The other case is not implemented yet!"
+        if U is None and self.layers[0].withControl: raise "The model needs control signals!"
+        if U is not None and step is None: step=U.shape[0] - self.layers[0].U_win
+        elif step is None: step=100
+        if init_Xs is None: init_Xs = [np.zeros((self.layers[i].X_win-1,self.layers[i].X_flat.shape[1])) for i in range(self.nLayers-1)]
         Xs = []
         con = U
         con_win = self.layers[0].U_win-1
