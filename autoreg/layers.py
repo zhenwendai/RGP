@@ -15,6 +15,7 @@ class Layer(SparseGP):
     
     def __init__(self, layer_upper, X, X_win=1, U=None, U_win=1, Z=None, num_inducing=10,  kernel=None, inference_method=None, likelihood=None, noise_var=1., name='layer'):
 
+        self.signal_dim = X.shape[1]
         self.layer_upper = layer_upper
         self.X_win = X_win # if X_win==1, it is not autoregressive.
         self.U_win = U_win
@@ -44,7 +45,11 @@ class Layer(SparseGP):
                                      np.hstack([self.X_var_conv.copy().copy(),self.U_var_conv.copy()]))
         
         if Z is None:
-            Z = np.random.permutation(self.X.mean.copy())[:num_inducing]
+#             Z = np.random.permutation(self.X.mean.copy())[:num_inducing]
+            from sklearn.cluster import KMeans
+            m = KMeans(n_clusters=num_inducing,n_init=100,max_iter=1000)
+            m.fit(self.X.mean.copy())
+            Z = m.cluster_centers_.copy()
         assert Z.shape[1] == self.X.shape[1]
         
         if kernel is None: kernel = kern.RBF(self.X.shape[1], ARD = True)
@@ -54,7 +59,9 @@ class Layer(SparseGP):
             inference_method = VarDTC()
         if likelihood is None: likelihood = likelihoods.Gaussian(variance=noise_var)
         self._toplayer_ = False
-        self.variationalterm = NormalEntropy()
+#        self.variationalterm = NormalEntropy()
+        self.normalPrior = NormalPrior()
+        self.normalEntropy = NormalEntropy()
         super(Layer, self).__init__(self.X, self.Y, Z, kernel, likelihood, inference_method=inference_method, name=name)
         if not self.X_observed: self.link_parameter(self.X_flat)
     
@@ -127,9 +134,6 @@ class Layer(SparseGP):
                                             dL_dpsi0=self.grad_dict['dL_dpsi0'],
                                             dL_dpsi1=self.grad_dict['dL_dpsi1'],
                                             dL_dpsi2=self.grad_dict['dL_dpsi2'])
-        delta = -self.variationalterm.comp_value(self.X)
-        self._log_marginal_likelihood += delta
-        self.variationalterm.update_gradients(self.X)
         
     def parameters_changed(self):
         self._update_X()
@@ -141,6 +145,14 @@ class Layer(SparseGP):
         if not self.X_observed:
             self.X_flat.mean.gradient[self.X_win-1:] += self.grad_dict['dL_dYmean']
             self.X_flat.variance.gradient[self.X_win-1:] += self.grad_dict['dL_dYvar'][:,None]
+            
+            delta = 0
+            if self.X_win>1:
+                delta += -self.normalPrior.comp_value(self.X_flat[:self.X_win-1])
+                self.normalPrior.update_gradients(self.X_flat[:self.X_win-1])
+            delta += -self.normalEntropy.comp_value(self.X_flat[self.X_win-1:])
+            self.normalEntropy.update_gradients(self.X_flat[self.X_win-1:])
+            self._log_marginal_likelihood += delta
 
     def set_as_toplayer(self, flag=True):
         if flag:
@@ -148,4 +160,29 @@ class Layer(SparseGP):
         else:
             self.variationalterm = NormalEntropy()
         self._toplayer_ = flag
+        
+    def freerun(self, init_Xs=None, step=None, U=None, m_match=True):
+        if U is None and self.withControl: raise "The model needs control signals!"
+        if U is not None and step is None: step=U.shape[0] - self.U_win
+        elif step is None: step=100
+        if init_Xs is None: init_Xs = np.zeros((self.X_win-1,self.X_flat.shape[1])) 
+        Q = self.signal_dim
+        
+        X_win,U_win = self.X_win, self.U_win
+        if X_win>1: # depends on history
+            X = np.empty((init_Xs.shape[0]+step, self.X_flat.shape[1]))
+            X[:X_win-1] = init_Xs[-X_win+1:]
+            X_in = np.empty((1, self.X.mean.shape[1]))
+            for n in range(step):
+                X_in[0,:(X_win-1)*Q] = X[n:n+X_win-1].flat
+                if self.withControl: X_in[0,(X_win-1)*Q:] = U[n:n+U_win].flat
+#                 import ipdb; ipdb.set_trace()
+                X[X_win-1+n] = self._raw_predict(X_in)[0]
+        else:
+            X = np.empty((step,self.X_flat.shape[1]))
+            X_in = np.empty((1,self.X.mean.shape[1]))
+            for n in range(step):
+                if self.withControl: X_in[0,:] = U[n:n+U_win].flat
+                X[X_win-1+n] = self._raw_predict(X_in)[0]
+        return X
 
