@@ -52,7 +52,6 @@ class DeepAutoreg(Model):
                 self.layers.append(Layer(self.layers[-1], Y, X_win=wins[i], U=self.Xs[i], U_win=wins[i+1]-1, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, likelihood=likelihood, noise_var=1., name='layer_'+str(i)))
             else:
                 self.layers.append(Layer(self.layers[-1], self.Xs[i-1], X_win=wins[i], U=self.Xs[i], U_win=wins[i+1]-1, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i)))
-#         self.layers[0].set_as_toplayer()
         self.link_parameters(*self.layers)
             
     def _init_X(self, wins, Y, U, X_variance, init='equal'):
@@ -72,36 +71,46 @@ class DeepAutoreg(Model):
         self._log_marginal_likelihood = np.sum([l._log_marginal_likelihood for l in self.layers])
         [l.update_latent_gradients() for l in self.layers[::-1]]
         
-    def freerun(self, init_Xs=None, step=None, U=None):
+    def freerun(self, init_Xs=None, step=None, U=None, m_match=True):
         assert self.U_pre_step, "The other case is not implemented yet!"
         if U is None and self.layers[0].withControl: raise "The model needs control signals!"
         if U is not None and step is None: step=U.shape[0] - self.layers[0].U_win
         elif step is None: step=100
-        if init_Xs is None: init_Xs = [np.zeros((self.layers[i].X_win-1,self.layers[i].X_flat.shape[1])) for i in range(self.nLayers-1)]
-        Xs = []
+        
         con = U
-        con_win = self.layers[0].U_win-1
+        con_win = self.layers[0].U_win - 1
         for i in range(self.nLayers):
-            layer = self.layers[i]
-            X_win,U_win = layer.X_win, layer.U_win
-            con = con[con_win-U_win+1:]
-            if X_win>1:
-                X = np.empty((init_Xs[i].shape[0]+step,layer.X_flat.shape[1]))
-                X[:init_Xs[i].shape[0]] = init_Xs[i]
-                X_in = np.empty((1,layer.X.mean.shape[1]))
-                for n in range(step):
-                    X_in[0,:X_win-1] = X[n:n+X_win-1].flat
-                    if layer.withControl: X_in[0,X_win-1:] = con[n:n+U_win].flat
-                    X[layer.X_win-1+n] = layer._raw_predict(X_in)[0]
-            else:
-                X = np.empty((step,layer.X_flat.shape[1]))
-                X_in = np.empty((1,layer.X.mean.shape[1]))
-                for n in range(step):
-                    if layer.withControl: X_in[0,X_win-1:] = con[n:n+U_win].flat
-                    X[layer.X_win-1+n] = layer._raw_predict(X_in)[0]
-            Xs.append(X)
+            con = con[con_win-self.layers[i].U_win+1:]
+            X = self.layers[i].freerun(init_Xs=None if init_Xs is None else init_Xs[-i-1], step=step,U=con,m_match=m_match)
             con = X
-            con_win = X_win-1
-        return con
+            con_win = self.layers[i].X_win-1
+        return X
+            
+        
+#         Xs = []
+#         con = U
+#         con_win = self.layers[0].U_win-1
+#         for i in range(self.nLayers):
+#             layer = self.layers[i]
+#             X_win,U_win = layer.X_win, layer.U_win
+#             con = con[con_win-U_win+1:]
+#             if X_win>1:
+#                 X = np.empty((init_Xs[i].shape[0]+step,layer.X_flat.shape[1]))
+#                 X[:init_Xs[i].shape[0]] = init_Xs[i]
+#                 X_in = np.empty((1,layer.X.mean.shape[1]))
+#                 for n in range(step):
+#                     X_in[0,:X_win-1] = X[n:n+X_win-1].flat
+#                     if layer.withControl: X_in[0,X_win-1:] = con[n:n+U_win].flat
+#                     X[layer.X_win-1+n] = layer._raw_predict(X_in)[0]
+#             else:
+#                 X = np.empty((step,layer.X_flat.shape[1]))
+#                 X_in = np.empty((1,layer.X.mean.shape[1]))
+#                 for n in range(step):
+#                     if layer.withControl: X_in[0,X_win-1:] = con[n:n+U_win].flat
+#                     X[layer.X_win-1+n] = layer._raw_predict(X_in)[0]
+#             Xs.append(X)
+#             con = X
+#             con_win = X_win-1
+#         return con
         
         

@@ -58,8 +58,6 @@ class Layer(SparseGP):
             from .inference import VarDTC
             inference_method = VarDTC()
         if likelihood is None: likelihood = likelihoods.Gaussian(variance=noise_var)
-        self._toplayer_ = False
-#        self.variationalterm = NormalEntropy()
         self.normalPrior = NormalPrior()
         self.normalEntropy = NormalEntropy()
         super(Layer, self).__init__(self.X, self.Y, Z, kernel, likelihood, inference_method=inference_method, name=name)
@@ -153,36 +151,48 @@ class Layer(SparseGP):
             delta += -self.normalEntropy.comp_value(self.X_flat[self.X_win-1:])
             self.normalEntropy.update_gradients(self.X_flat[self.X_win-1:])
             self._log_marginal_likelihood += delta
-
-    def set_as_toplayer(self, flag=True):
-        if flag:
-            self.variationalterm = NormalPrior()
-        else:
-            self.variationalterm = NormalEntropy()
-        self._toplayer_ = flag
         
     def freerun(self, init_Xs=None, step=None, U=None, m_match=True):
         if U is None and self.withControl: raise "The model needs control signals!"
         if U is not None and step is None: step=U.shape[0] - self.U_win
         elif step is None: step=100
-        if init_Xs is None: init_Xs = np.zeros((self.X_win-1,self.X_flat.shape[1])) 
+        if init_Xs is None and self.X_win>1:
+            if m_match:
+                init_Xs = NormalPosterior(np.zeros((self.X_win-1,self.X_flat.shape[1])),np.ones((self.X_win-1,self.X_flat.shape[1]))*1)
+            else:
+                init_Xs = np.zeros((self.X_win-1,self.X_flat.shape[1])) 
         Q = self.signal_dim
+        X_win, U_win = self.X_win, self.U_win
         
-        X_win,U_win = self.X_win, self.U_win
-        if X_win>1: # depends on history
-            X = np.empty((init_Xs.shape[0]+step, self.X_flat.shape[1]))
-            X[:X_win-1] = init_Xs[-X_win+1:]
-            X_in = np.empty((1, self.X.mean.shape[1]))
+        if m_match:
+            X = NormalPosterior(np.empty((X_win-1+step, self.X_flat.shape[1])),np.ones((X_win-1+step, self.X_flat.shape[1])))
+            if X_win>1:
+                X.mean[:X_win-1] = init_Xs.mean[-X_win+1:]
+                X.variance[:X_win-1] = init_Xs.variance[-X_win+1:]
+            X_in =NormalPosterior(np.empty((1, self.X.mean.shape[1])),np.ones((1, self.X.mean.shape[1])))
+            X_in.variance[:] = 1e-10
             for n in range(step):
-                X_in[0,:(X_win-1)*Q] = X[n:n+X_win-1].flat
-                if self.withControl: X_in[0,(X_win-1)*Q:] = U[n:n+U_win].flat
-#                 import ipdb; ipdb.set_trace()
-                X[X_win-1+n] = self._raw_predict(X_in)[0]
+                if X_win>1:
+                    X_in.mean[0,:(X_win-1)*Q] = X.mean[n:n+X_win-1].flat
+                    X_in.variance[0,:(X_win-1)*Q] = X.variance[n:n+X_win-1].flat
+                if self.withControl: 
+                    if isinstance(U, NormalPosterior):
+                        X_in.mean[0,(X_win-1)*Q:] = U.mean[n:n+U_win].flat
+                        X_in.variance[0,(X_win-1)*Q:] = U.variance[n:n+U_win].flat
+                    else:
+                        X_in.mean[0,(X_win-1)*Q:] = U[n:n+U_win].flat
+                X_out = self._raw_predict(X_in)
+                X.mean[X_win-1+n] = X_out[0]
+                if np.any(X_out[1]<=0.): print X_out[1]
+                X.variance[X_win-1+n] = X_out[1]
         else:
-            X = np.empty((step,self.X_flat.shape[1]))
+            X = np.empty((X_win-1+step, self.X_flat.shape[1]))
             X_in = np.empty((1,self.X.mean.shape[1]))
+            if X_win>1: # depends on history                
+                X[:X_win-1] = init_Xs[-X_win+1:]
             for n in range(step):
-                if self.withControl: X_in[0,:] = U[n:n+U_win].flat
+                if X_win>1: X_in[0,:(X_win-1)*Q] = X[n:n+X_win-1].flat
+                if self.withControl: X_in[0,(X_win-1)*Q:] = U[n:n+U_win].flat
                 X[X_win-1+n] = self._raw_predict(X_in)[0]
         return X
 
