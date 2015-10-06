@@ -38,7 +38,7 @@ class DeepAutoreg(Model):
         self.Y = Y
         self.U_win = U_win
 
-        self.Xs = self._init_X(wins, Y, U, X_variance)
+        self.Xs = self._init_X(wins, Y, U, X_variance, init=init)
         
         # Parameters which exist differently per layer but specified as single componenents are here expanded to each layer
         if not isinstance(num_inducing, list or tuple): num_inducing = [num_inducing]*self.nLayers
