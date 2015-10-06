@@ -91,7 +91,7 @@ class Autoreg_onelayer(AutoregMethod):
 class Autoreg_onelayer_bfgs(AutoregMethod):
     name = 'onelayer-bfgs'
     def __init__(self, win_in, win_out):
-        super(Autoreg_onelayer, self).__init__()
+        super(Autoreg_onelayer_bfgs, self).__init__()
         self.win_in = win_in
         self.win_out = win_out
     
