@@ -38,13 +38,21 @@ class CSV_Summary(Output):
         import pandas
         
         nEvals = results.columns[4:].shape[0]
-        s = pandas.DataFrame(index=task_list['task'], columns=[m+'-'+e+'-'+x for m in method_list['method'] for e in results.columns[4:] for x in ['mean', 'std']])
+        stat = ['min', 'mean', 'std']
+        nStat = len(stat)
+        s = pandas.DataFrame(index=task_list['task'], columns=[m+'-'+e+'-'+x for m in method_list['method'] for e in results.columns[4:] for x in stat])
         
         for task_i in range(task_list.shape[0]):
             for method_i in range(method_list.shape[0]):
                 for e_i in range(nEvals):
-                    s.iloc[task_i,method_i*nEvals*2+e_i*2] = results[(results.task_id==task_i) & (results.method_id==method_i)][results.columns[e_i+4]].mean()
-                    s.iloc[task_i,method_i*nEvals*2+e_i*2+1] = results[(results.task_id==task_i) & (results.method_id==method_i)][results.columns[e_i+4]].std()  
+                    for s_i in range(nStat):
+                        if stat[s_i]=='min':
+                            val =  results[(results.task_id==task_i) & (results.method_id==method_i)][results.columns[e_i+4]].min()
+                        elif stat[s_i]=='mean':
+                            val =  results[(results.task_id==task_i) & (results.method_id==method_i)][results.columns[e_i+4]].mean()
+                        elif stat[s_i]=='std':
+                            val =  results[(results.task_id==task_i) & (results.method_id==method_i)][results.columns[e_i+4]].std()
+                        s.iloc[task_i,method_i*nEvals*nStat+e_i*nStat+s_i] = val  
         s.to_csv(self.fname)
         
             
