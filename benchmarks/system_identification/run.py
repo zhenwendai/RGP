@@ -3,7 +3,7 @@
 
 from __future__ import print_function
 from evaluation import RMSE
-from methods import Autoreg_onelayer
+from methods import Autoreg_onelayer, Autoreg_onelayer_bfgs
 from tasks import all_tasks
 from outputs import PickleOutput, CSV_Summary
 import numpy as np
@@ -11,11 +11,10 @@ import time
 import pandas
 
 outpath = '.'
-prjname = 'autoreg'
+prjname = 'autoreg-bfgs'
 config = {
-          'use_jug': True,
           'evaluations':[RMSE,'time'],
-          'methods':[Autoreg_onelayer],
+          'methods':[Autoreg_onelayer_bfgs],
           'tasks': all_tasks,
           'repeats': 5,
           'outputs': [PickleOutput(outpath, prjname), CSV_Summary(outpath, prjname)]
