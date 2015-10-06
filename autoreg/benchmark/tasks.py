@@ -9,7 +9,7 @@ import scipy.io
 class AutoregTask(object):
     __metaclass__ = abc.ABCMeta
     
-    def __init__(self, datapath='./datasets'):
+    def __init__(self, datapath=os.path.join(os.path.dirname(__file__),'../../datasets/system_identification')):
         self.datapath = datapath
         
     def _enforce_2d(self):

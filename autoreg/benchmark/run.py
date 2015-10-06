@@ -11,8 +11,8 @@ import time
 import pandas
 
 outpath = '.'
-prjname = 'autoreg-bfgs'
-config = {
+prjname = 'autoreg'
+default_config = {
           'evaluations':[RMSE,'time'],
           'methods':[Autoreg_onelayer_bfgs],
           'tasks': all_tasks,
@@ -20,8 +20,7 @@ config = {
           'outputs': [PickleOutput(outpath, prjname), CSV_Summary(outpath, prjname)]
           }
 
-
-if __name__=='__main__':
+def run(config=default_config):
     
     nTask = len(config['tasks'])
     nMethod = len(config['methods'])
