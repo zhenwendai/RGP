@@ -13,7 +13,7 @@ class DeepAutoreg(Model):
     :type U_pre_step: Boolean
     """
     
-    def __init__(self, wins, Y, U=None, U_win=1, X_variance=0.01, num_inducing=10, likelihood = None, name='autoreg', kernels=None, U_pre_step=True):
+    def __init__(self, wins, Y, U=None, U_win=1, X_variance=0.01, num_inducing=10, likelihood = None, name='autoreg', kernels=None, U_pre_step=True, init='Y'):
         super(DeepAutoreg, self).__init__(name=name)
         
         self.nLayers = len(wins)
@@ -54,14 +54,24 @@ class DeepAutoreg(Model):
                 self.layers.append(Layer(self.layers[-1], self.Xs[i-1], X_win=wins[i], U=self.Xs[i], U_win=wins[i+1]-1, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i)))
         self.link_parameters(*self.layers)
             
-    def _init_X(self, wins, Y, U, X_variance, init='equal'):
+    def _init_X(self, wins, Y, U, X_variance, init='Y'):
         Xs = []
-        if init=='equal':
+        if init=='Y':
             for i in range(len(wins)-1):
                 mean = np.zeros((wins[i+1]-1+Y.shape[0],Y.shape[1]))
-                mean[wins[i+1]-1:] = Y
+                mean[wins[i+1]-1:] = Y+np.random.randn(*Y.shape)*0.01
                 var = np.zeros((wins[i+1]-1+Y.shape[0],Y.shape[1]))+X_variance
                 Xs.append(NormalPosterior(mean,var))
+        elif init=='rand' :
+            for i in range(len(wins)-1):
+                mean = np.zeros((wins[i+1]-1+Y.shape[0],Y.shape[1]))
+                mean[:] = np.random.randn(*mean.shape)
+        elif init=='zero':
+            for i in range(len(wins)-1):
+                mean = np.zeros((wins[i+1]-1+Y.shape[0],Y.shape[1]))
+                mean[:] = np.random.randn(*mean.shape)*0.01
+        var = np.zeros((wins[i+1]-1+Y.shape[0],Y.shape[1]))+X_variance
+        Xs.append(NormalPosterior(mean,var))
         return Xs
         
     def log_likelihood(self):
