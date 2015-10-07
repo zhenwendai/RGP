@@ -25,7 +25,7 @@ class VarDTC(LatentFunctionInference):
     For efficiency, we sometimes work with the cholesky of Y*Y.T. To save repeatedly recomputing this, we cache it.
 
     """
-    const_jitter = 1e-8
+    const_jitter = 1e-6
     def __init__(self, mpi_comm=None):
 
         self.mpi_comm = mpi_comm

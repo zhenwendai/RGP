@@ -59,7 +59,7 @@ class DeepAutoreg(Model):
         if init=='Y':
             for i in range(len(wins)-1):
                 mean = np.zeros((wins[i+1]-1+Y.shape[0],Y.shape[1]))
-                mean[wins[i+1]-1:] = Y+np.random.randn(*Y.shape)*0.01
+                mean[wins[i+1]-1:] = Y
                 var = np.zeros((wins[i+1]-1+Y.shape[0],Y.shape[1]))+X_variance
                 Xs.append(NormalPosterior(mean,var))
         elif init=='rand' :
