@@ -28,7 +28,7 @@ class Autoreg_twolayer(AutoregMethod):
         m = self.model
         # initialization
         for i in range(m.nLayers):
-            m.layers[i].kern.inv_l[:]  = 1./((m.layers[i].X.mean.values.max(0)-m.layers[i].X.mean.values.min(0))/np.sqrt(2.))**2
+            m.layers[i].kern.inv_l[:]  = 1./((m.layers[i].X.mean.values.max(0)-m.layers[i].X.mean.values.min(0))/np.sqrt(2.))
             m.layers[i].likelihood.variance[:] = 0.01*data_out_train.var()
             m.layers[i].kern.variance.fix(warning=False)
             m.layers[i].likelihood.fix(warning=False)
