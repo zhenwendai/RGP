@@ -13,10 +13,11 @@ class DeepAutoreg(Model):
     :type U_pre_step: Boolean
     """
     
-    def __init__(self, wins, Y, U=None, U_win=1, X_variance=0.01, num_inducing=10, likelihood = None, name='autoreg', kernels=None, U_pre_step=True, init='Y'):
+    def __init__(self, wins, Y, U=None, U_win=1, X_variance=0.01, num_inducing=10, likelihood = None, name='autoreg', kernels=None, U_pre_step=True, init='Y', back_cstr=False, MLP_dims=None):
         super(DeepAutoreg, self).__init__(name=name)
         
         self.nLayers = len(wins)
+        self.back_cstr = back_cstr
         self.wins = wins = [i+1 for i in wins]
         self.input_dim = 1
         self.output_dim = 1
@@ -47,11 +48,11 @@ class DeepAutoreg(Model):
         self.layers = []
         for i in range(self.nLayers-1,-1,-1):
             if i==self.nLayers-1:
-                self.layers.append(Layer(None, self.Xs[i-1], X_win=wins[i], U=self.U, U_win=U_win, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i)))
+                self.layers.append(Layer(None, self.Xs[i-1], X_win=wins[i], U=self.U, U_win=U_win, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i),  back_cstr=back_cstr, MLP_dims=MLP_dims))
             elif i==0:
                 self.layers.append(Layer(self.layers[-1], Y, X_win=wins[i], U=self.Xs[i], U_win=wins[i+1]-1, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, likelihood=likelihood, noise_var=1., name='layer_'+str(i)))
             else:
-                self.layers.append(Layer(self.layers[-1], self.Xs[i-1], X_win=wins[i], U=self.Xs[i], U_win=wins[i+1]-1, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i)))
+                self.layers.append(Layer(self.layers[-1], self.Xs[i-1], X_win=wins[i], U=self.Xs[i], U_win=wins[i+1]-1, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i), back_cstr=back_cstr, MLP_dims=MLP_dims))
         self.link_parameters(*self.layers)
             
     def _init_X(self, wins, Y, U, X_variance, init='Y'):
