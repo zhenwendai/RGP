@@ -3,7 +3,7 @@
 
 import numpy as np
 
-from GPy.core import SparseGP
+from GPy.core import SparseGP, Param
 from GPy import likelihoods
 from GPy import kern
 from GPy.core.parameterization.variational import NormalPosterior, NormalPrior, VariationalPosterior
@@ -44,8 +44,9 @@ class Layer(SparseGP):
             assert self.X_win>1
             Q = (self.X_win-1+self.U_win)*self.signal_dim
             self.init_X = NormalPosterior(self.X_flat.mean.values[:self.X_win-1],self.X_flat.variance.values[:self.X_win-1])
-            self.encoder = MLP([Q*2, Q*4, Q*2+self.Y.shape[1], self.Y.shape[1]*2] if MLP_dims is None else [Q*2]+deepcopy(MLP_dims)+[self.Y.shape[1]*2])
+            self.encoder = MLP([Q, Q*2, Q+self.Y.shape[1]/2, self.Y.shape[1]] if MLP_dims is None else [Q]+deepcopy(MLP_dims)+[self.Y.shape[1]])
             self.var_trans = Logexp()
+            self.X_var = Param('X_var',self.X_flat.variance.values[self.X_win-1:].copy(), Logexp())
         self._update_conv()
         if not self.withControl:
             self.X = NormalPosterior(self.X_mean_conv.copy(),self.X_var_conv.copy())
@@ -56,12 +57,11 @@ class Layer(SparseGP):
                                      np.hstack([self.X_var_conv.copy().copy(),self.U_var_conv.copy()]))
         
         if Z is None:
-#             Z = np.random.permutation(self.X.mean.values.copy())[:num_inducing]
-#             Z = self.X.mean.values.copy()[:num_inducing*5:5]
-            from sklearn.cluster import KMeans
-            m = KMeans(n_clusters=num_inducing,n_init=1000,max_iter=100)
-            m.fit(self.X.mean.values.copy())
-            Z = m.cluster_centers_.copy()
+            Z = np.random.permutation(self.X.mean.values.copy())[:num_inducing]
+#             from sklearn.cluster import KMeans
+#             m = KMeans(n_clusters=num_inducing,n_init=1000,max_iter=100)
+#             m.fit(self.X.mean.values.copy())
+#             Z = m.cluster_centers_.copy()
         assert Z.shape[1] == self.X.shape[1]
         
         if kernel is None: kernel = kern.RBF(self.X.shape[1], ARD = True)
@@ -79,11 +79,7 @@ class Layer(SparseGP):
                 from copy import deepcopy
                 from GPy.core.parameterization.transformations import Logexp
                 assert self.X_win>1
-                self.init_X = NormalPosterior(self.X_flat.mean.values[:self.X_win-1].copy(),self.X_flat.variance.values[:self.X_win-1].copy())
-                self.encoder = MLP([self.X.shape[1]*2, self.X.shape[1]*4, self.X.shape[1]*2+self.Y.shape[1], self.Y.shape[1]*2] if MLP_dims is None else [self.X.shape[1]*2]+deepcopy(MLP_dims)+[self.Y.shape[1]*2])
-                self.var_trans = Logexp()
-                self.link_parameters(self.init_X, self.encoder, self.X_flat)
-                self.X_flat.mean.fix(warning=False)
+                self.link_parameters(self.init_X, self.encoder, self.X_var)
             else:
                 self.link_parameter(self.X_flat)
     
@@ -163,6 +159,9 @@ class Layer(SparseGP):
         self._update_X()
         super(Layer,self).parameters_changed()
         self._update_qX_gradients()
+        if self.withControl and self.layer_upper is None:
+            self.U_flat.mean.gradient[:] = 0
+            self.U_flat.variance.gradient[:] = 0
         if not self.X_observed: 
             self.X_flat.mean.gradient[:] = 0.
             self.X_flat.variance.gradient[:] = 0.
@@ -179,56 +178,43 @@ class Layer(SparseGP):
             self._log_marginal_likelihood += delta
 
     def _encoder_freerun(self):
-        Q = self.signal_dim
+        Q, N = self.signal_dim, self.X_flat.shape[0]-self.X_win+1
         X_win, U_win = self.X_win, self.U_win
         X_dim = (X_win-1+U_win)*Q
         Y_dim = Q
 
+        self.X_flat.variance[:X_win-1] = self.init_X.variance.values
+        self.X_flat.variance[X_win-1:] = self.X_var.values
         self.X_flat.mean[:X_win-1] = self.init_X.mean.values
-        self.X_var = np.zeros(self.X_flat.variance.shape)
-        self.X_var[:X_win-1] = self.var_trans.finv(self.init_X.variance.values)
-        if self.withControl:
-            self.U_var = self.var_trans.finv(self.U_flat.variance.values)
-        X_in = np.zeros((X_dim*2,))
-        X_in[:] = self.var_trans.finv(1e-10)
-        for n in range(self.X_flat.shape[0]-X_win+1):
+        X_in = np.zeros((X_dim,))
+        U_offset = self.U_flat.shape[0]-N-U_win+1
+        for n in range(N):
             X_in[:(X_win-1)*Q] = self.X_flat.mean[n:n+X_win-1].flat
-            X_in[X_dim:X_dim+(X_win-1)*Q] = self.X_var[n:n+X_win-1].flat
             if self.withControl: 
-                X_in[(X_win-1)*Q:X_dim] = self.U_flat.mean[n:n+U_win].flat
-                X_in[X_dim+(X_win-1)*Q:] = self.U_var[n:n+U_win].flat
+                X_in[(X_win-1)*Q:X_dim] = self.U_flat.mean[U_offset+n:U_offset+n+U_win].flat
             X_out = self.encoder.predict(X_in[None,:])
             self.X_flat.mean[X_win-1+n] = X_out[0,:Y_dim].reshape(-1,Q)
-            self.X_var[X_win-1+n] = X_out[0,Y_dim:].reshape(-1,Q)
-        self.X_flat.variance[:] = self.var_trans.f(self.X_var)
     
     def _encoder_update_gradient(self):
         self.encoder.prepare_grad()
-        Q = self.signal_dim
+        Q, N = self.signal_dim, self.X_flat.shape[0]-self.X_win+1
         X_win, U_win = self.X_win, self.U_win
         X_dim = self.X.shape[1]
         Y_dim = self.Y.shape[1]
 
-        X_in = np.zeros((X_dim*2,))
-        X_in[:] = self.var_trans.finv(1e-10)
-        dL = np.zeros((Y_dim*2,))
-        X_var_grad = self.X_flat.variance.gradient/(1+np.exp(-self.X_var))
-        if self.withControl: U_var_grad = self.U_flat.variance.gradient/(1+np.exp(-self.U_var))
+        X_in = np.zeros((X_dim,))
+        dL = np.zeros((Y_dim,))
+        U_offset = self.U_flat.shape[0]-N-U_win+1
         for n in range(self.Y.shape[0]-1,-1,-1):
             X_in[:X_dim] = self.X.mean[n]
-            X_in[X_dim:X_dim+(X_win-1)*Q] = self.X_var[n:n+X_win-1].flat
-            if self.withControl: 
-                X_in[X_dim+(X_win-1)*Q:] = self.U_var[n:n+U_win].flat
             dL[:Y_dim] = self.X_flat.mean.gradient[X_win-1+n].flat
-            dL[Y_dim:] = X_var_grad[X_win-1+n].flat
             dX = self.encoder.update_gradient(X_in[None,:], dL[None,:])
             self.X_flat.mean.gradient[n:n+X_win-1] += dX[0,:(X_win-1)*Q].reshape(-1,Q)
-            X_var_grad[n:n+X_win-1] += dX[0,X_dim:X_dim+(X_win-1)*Q].reshape(-1,Q)
             if self.withControl:
-                self.U_flat.mean.gradient[n:n+U_win] += dX[0,(X_win-1)*Q:X_dim].reshape(-1,Q)
-                X_var_grad[n:n+U_win] += dX[0,X_dim+(X_win-1)*Q:].reshape(-1,Q)
+                self.U_flat.mean.gradient[U_offset+n:U_offset+n+U_win] += dX[0,(X_win-1)*Q:X_dim].reshape(-1,Q)
         self.init_X.mean.gradient[:] = self.X_flat.mean.gradient[:X_win-1]
-        self.init_X.variance.gradient[:] = X_var_grad[:X_win-1]/(1.-np.exp(-self.init_X.variance.values))
+        self.X_var.gradient[:] = self.X_flat.variance.gradient[X_win-1:]
+        self.init_X.variance.gradient[:] = self.X_flat.variance.gradient[:X_win-1]
         
     def freerun(self, init_Xs=None, step=None, U=None, m_match=True):
         if U is None and self.withControl: raise "The model needs control signals!"

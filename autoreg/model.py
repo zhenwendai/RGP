@@ -123,5 +123,6 @@ class DeepAutoreg(Model):
 #             con = X
 #             con_win = X_win-1
 #         return con
+
         
         
