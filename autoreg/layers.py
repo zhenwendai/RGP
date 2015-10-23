@@ -226,7 +226,7 @@ class Layer(SparseGP):
                 init_Xs = NormalPosterior(np.zeros((self.X_win-1,self.X_flat.shape[1])),np.ones((self.X_win-1,self.X_flat.shape[1]))*1)
             else:
                 init_Xs = np.zeros((self.X_win-1,self.X_flat.shape[1])) 
-        Q = self.signal_dim
+        QX, QU = self.X_dim, self.U_dim
         X_win, U_win = self.X_win, self.U_win
         
         if m_match:
@@ -238,14 +238,14 @@ class Layer(SparseGP):
             X_in.variance[:] = 1e-10
             for n in range(step):
                 if X_win>1:
-                    X_in.mean[0,:(X_win-1)*Q] = X.mean[n:n+X_win-1].flat
-                    X_in.variance[0,:(X_win-1)*Q] = X.variance[n:n+X_win-1].flat
+                    X_in.mean[0,:(X_win-1)*QX] = X.mean[n:n+X_win-1].flat
+                    X_in.variance[0,:(X_win-1)*QX] = X.variance[n:n+X_win-1].flat
                 if self.withControl: 
                     if isinstance(U, NormalPosterior):
-                        X_in.mean[0,(X_win-1)*Q:] = U.mean[n:n+U_win].flat
-                        X_in.variance[0,(X_win-1)*Q:] = U.variance[n:n+U_win].flat
+                        X_in.mean[0,(X_win-1)*QU:] = U.mean[n:n+U_win].flat
+                        X_in.variance[0,(X_win-1)*QU:] = U.variance[n:n+U_win].flat
                     else:
-                        X_in.mean[0,(X_win-1)*Q:] = U[n:n+U_win].flat
+                        X_in.mean[0,(X_win-1)*QU:] = U[n:n+U_win].flat
                 X_out = self._raw_predict(X_in)
                 X.mean[X_win-1+n] = X_out[0]
                 if np.any(X_out[1]<=0.): print X_out[1]
@@ -256,8 +256,8 @@ class Layer(SparseGP):
             if X_win>1: # depends on history                
                 X[:X_win-1] = init_Xs[-X_win+1:]
             for n in range(step):
-                if X_win>1: X_in[0,:(X_win-1)*Q] = X[n:n+X_win-1].flat
-                if self.withControl: X_in[0,(X_win-1)*Q:] = U[n:n+U_win].flat
+                if X_win>1: X_in[0,:(X_win-1)*QX] = X[n:n+X_win-1].flat
+                if self.withControl: X_in[0,(X_win-1)*QU:] = U[n:n+U_win].flat
                 X[X_win-1+n] = self._raw_predict(X_in)[0]
         return X
 
