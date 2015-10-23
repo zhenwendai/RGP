@@ -19,7 +19,8 @@ class Layer(SparseGP):
         self.layer_upper = layer_upper
         self.X_win = X_win # if X_win==1, it is not autoregressive.
         self.U_win = U_win
-        self.Q_dim = X.shape[1]
+        self.X_dim = X.shape[1]
+        self.U_dim = U.shape[1] if U is not None else None
         self.back_cstr = back_cstr
         
         self.X_flat = X
@@ -133,18 +134,18 @@ class Layer(SparseGP):
         N = self.Y.shape[0]
         for n in xrange(self.X.shape[0]):
             if not self.withControl:
-                self.X_flat.mean.gradient[n:n+self.X_win-1] += self.X.mean.gradient[n].reshape(-1,self.Q_dim)
-                self.X_flat.variance.gradient[n:n+self.X_win-1] += self.X.variance.gradient[n].reshape(-1,self.Q_dim)
+                self.X_flat.mean.gradient[n:n+self.X_win-1] += self.X.mean.gradient[n].reshape(-1,self.X_dim)
+                self.X_flat.variance.gradient[n:n+self.X_win-1] += self.X.variance.gradient[n].reshape(-1,self.X_dim)
             elif self.X_win==1:
                 offset = -N-self.U_win+1+self.U_flat.shape[0]
-                self.U_flat.mean.gradient[offset+n:offset+n+self.U_win] += self.X.mean.gradient[n].reshape(-1,self.Q_dim)
-                self.U_flat.variance.gradient[offset+n:offset+n+self.U_win] += self.X.variance.gradient[n].reshape(-1,self.Q_dim)
+                self.U_flat.mean.gradient[offset+n:offset+n+self.U_win] += self.X.mean.gradient[n].reshape(-1,self.U_dim)
+                self.U_flat.variance.gradient[offset+n:offset+n+self.U_win] += self.X.variance.gradient[n].reshape(-1,self.U_dim)
             else:
                 offset = -N-self.U_win+1+self.U_flat.shape[0]
-                self.X_flat.mean.gradient[n:n+self.X_win-1] += self.X.mean.gradient[n,:self.X_mean_conv.shape[1]].reshape(-1,self.Q_dim)
-                self.X_flat.variance.gradient[n:n+self.X_win-1] += self.X.variance.gradient[n,:self.X_mean_conv.shape[1]].reshape(-1,self.Q_dim)
-                self.U_flat.mean.gradient[offset+n:offset+n+self.U_win] += self.X.mean.gradient[n,self.X_mean_conv.shape[1]:].reshape(-1,self.Q_dim)
-                self.U_flat.variance.gradient[offset+n:offset+n+self.U_win] += self.X.variance.gradient[n,self.X_mean_conv.shape[1]:].reshape(-1,self.Q_dim)
+                self.X_flat.mean.gradient[n:n+self.X_win-1] += self.X.mean.gradient[n,:self.X_mean_conv.shape[1]].reshape(-1,self.X_dim)
+                self.X_flat.variance.gradient[n:n+self.X_win-1] += self.X.variance.gradient[n,:self.X_mean_conv.shape[1]].reshape(-1,self.X_dim)
+                self.U_flat.mean.gradient[offset+n:offset+n+self.U_win] += self.X.mean.gradient[n,self.X_mean_conv.shape[1]:].reshape(-1,self.U_dim)
+                self.U_flat.variance.gradient[offset+n:offset+n+self.U_win] += self.X.variance.gradient[n,self.X_mean_conv.shape[1]:].reshape(-1,self.U_dim)
         if self.back_cstr: self._encoder_update_gradient()
     
     def _update_qX_gradients(self):

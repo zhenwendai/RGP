@@ -111,30 +111,33 @@ class VarDTC(LatentFunctionInference):
         diag.add(Kmm, self.const_jitter)
         Lm = jitchol(Kmm)
 
-        LmInv = dtrtri(Lm)
+        #LmInv = dtrtri(Lm)
         if uncertain_inputs:
-            LmInvPsi2LmInvT = LmInv.dot(psi2.dot(LmInv.T))
+            LmInvPsi2LmInvT = backsub_both_sides(Lm, psi2, 'right')
         else:
-            LmInvPsi2LmInvT = tdot(psi1.dot(LmInv.T).T) /beta
+            LmInvPsi2LmInvT = tdot(dtrtrs(Lm, psi1.T)[0])/beta #tdot(psi1.dot(LmInv.T).T) /beta
             
         Lambda = np.eye(Kmm.shape[0])+LmInvPsi2LmInvT
-        LL = jitchol(Lambda)        
-        LLInv = dtrtri(LL)
-        LmLLInv = LLInv.dot(LmInv)
+        LL = jitchol(Lambda)
+        LmLL = Lm.dot(LL)
+#        LLInv = dtrtri(LL)
+ #       LmLLInv = LLInv.dot(LmInv)
         
         logdet_L = 2.*np.sum(np.log(np.diag(LL)))
-        b  = psi1Y.dot(LmLLInv.T)
+        b  = dtrtrs(LmLL, psi1Y.T)[0].T #psi1Y.dot(LmLLInv.T)
         bbt = np.square(b).sum()
-        v = b.dot(LmLLInv)
+        v = dtrtrs(LmLL, b.T, trans=1)[0].T #b.dot(LmLLInv)
         LLinvPsi1TYYTPsi1LLinvT = tdot(b.T)
         
         if psi1S is not None:
-            psi1SLLinv = psi1S.dot(LmLLInv.T)
+            psi1SLLinv = dtrtrs(LmLL, psi1S.T)[0].T #psi1S.dot(LmLLInv.T)
             bbt += np.square(psi1SLLinv).sum()
             LLinvPsi1TYYTPsi1LLinvT += tdot(psi1SLLinv.T)
-            psi1SP = psi1SLLinv.dot(LmLLInv)
-        tmp = -LLInv.T.dot(LLinvPsi1TYYTPsi1LLinvT+output_dim*np.eye(input_dim)).dot(LLInv)
-        dL_dpsi2R = LmInv.T.dot(tmp+output_dim*np.eye(input_dim)).dot(LmInv)/2.
+            psi1SP = dtrtrs(LmLL, psi1SLLinv.T, trans=1)[0].T #psi1SLLinv.dot(LmLLInv)
+        tmp = -backsub_both_sides(LL, LLinvPsi1TYYTPsi1LLinvT+output_dim*np.eye(input_dim))
+        dL_dpsi2R = backsub_both_sides(Lm, tmp+output_dim*np.eye(input_dim))/2
+        #tmp = -LLInv.T.dot(LLinvPsi1TYYTPsi1LLinvT+output_dim*np.eye(input_dim)).dot(LLInv)
+        #dL_dpsi2R = LmInv.T.dot(tmp+output_dim*np.eye(input_dim)).dot(LmInv)/2.
 
         #======================================================================
         # Compute log-likelihood
@@ -146,7 +149,7 @@ class VarDTC(LatentFunctionInference):
         # Compute dL_dKmm
         #======================================================================
 
-        dL_dKmm =  dL_dpsi2R - output_dim* LmInv.T.dot(LmInvPsi2LmInvT).dot(LmInv)/2.
+        dL_dKmm =  dL_dpsi2R - output_dim* backsub_both_sides(Lm, LmInvPsi2LmInvT)/2 #LmInv.T.dot(LmInvPsi2LmInvT).dot(LmInv)/2.
 
         #======================================================================
         # Compute the Posterior distribution of inducing points p(u|Y)
@@ -193,7 +196,7 @@ class VarDTC(LatentFunctionInference):
             
         if uncertain_outputs:
             m,s = Y.mean, Y.variance
-            psi1LmiLLi = psi1.dot(LmLLInv.T)
+            psi1LmiLLi = dtrtrs(LmLL, psi1.T)[0].T #psi1.dot(LmLLInv.T)
             LLiLmipsi1Y = b.T
             grad_dict['dL_dYmean'] = -m*beta+ psi1LmiLLi.dot(LLiLmipsi1Y)
             grad_dict['dL_dYvar'] = beta/-2.+ np.square(psi1LmiLLi).sum(axis=1)/2

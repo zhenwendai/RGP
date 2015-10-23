@@ -13,7 +13,7 @@ class DeepAutoreg(Model):
     :type U_pre_step: Boolean
     """
     
-    def __init__(self, wins, Y, U=None, U_win=1, X_variance=0.01, num_inducing=10, likelihood = None, name='autoreg', kernels=None, U_pre_step=True, init='Y', back_cstr=False, MLP_dims=None):
+    def __init__(self, wins, Y, U=None, U_win=1, nDims=None, X_variance=0.01, num_inducing=10, likelihood = None, name='autoreg', kernels=None, U_pre_step=True, init='Y', back_cstr=False, MLP_dims=None):
         super(DeepAutoreg, self).__init__(name=name)
         
         self.nLayers = len(wins)
@@ -23,6 +23,7 @@ class DeepAutoreg(Model):
         self.output_dim = 1
         self._log_marginal_likelihood = np.nan
         self.U_pre_step = U_pre_step
+        self.nDims = nDims if nDims is not None else [Y.shape[1]]+[1]*(len(wins)-1)
         
         
         if U is not None:
@@ -39,7 +40,7 @@ class DeepAutoreg(Model):
         self.Y = Y
         self.U_win = U_win
 
-        self.Xs = self._init_X(wins, Y, U, X_variance, init=init)
+        self.Xs = self._init_X(wins, Y, U, X_variance, init=init, nDims=self.nDims)
         
         # Parameters which exist differently per layer but specified as single componenents are here expanded to each layer
         if not isinstance(num_inducing, list or tuple): num_inducing = [num_inducing]*self.nLayers
@@ -55,24 +56,26 @@ class DeepAutoreg(Model):
                 self.layers.append(Layer(self.layers[-1], self.Xs[i-1], X_win=wins[i], U=self.Xs[i], U_win=wins[i+1]-1, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i), back_cstr=back_cstr, MLP_dims=MLP_dims))
         self.link_parameters(*self.layers)
             
-    def _init_X(self, wins, Y, U, X_variance, init='Y'):
+    def _init_X(self, wins, Y, U, X_variance, nDims, init='Y'):
         Xs = []
         if init=='Y':
             for i in range(len(wins)-1):
-                mean = np.zeros((wins[i+1]-1+Y.shape[0],Y.shape[1]))
-                mean[wins[i+1]-1:] = Y
-                var = np.zeros((wins[i+1]-1+Y.shape[0],Y.shape[1]))+X_variance
+                mean = np.zeros((wins[i+1]-1+Y.shape[0], nDims[i+1]))
+                mean[wins[i+1]-1:] = Y[:,:nDims[i+1]]
+                var = np.zeros((wins[i+1]-1+Y.shape[0],nDims[i+1]))+X_variance
                 Xs.append(NormalPosterior(mean,var))
         elif init=='rand' :
             for i in range(len(wins)-1):
-                mean = np.zeros((wins[i+1]-1+Y.shape[0],Y.shape[1]))
+                mean = np.zeros((wins[i+1]-1+Y.shape[0], nDims[i+1]))
                 mean[:] = np.random.randn(*mean.shape)
+                var = np.zeros((wins[i+1]-1+Y.shape[0],nDims[i+1]))+X_variance
+                Xs.append(NormalPosterior(mean,var))
         elif init=='zero':
             for i in range(len(wins)-1):
-                mean = np.zeros((wins[i+1]-1+Y.shape[0],Y.shape[1]))
+                mean = np.zeros((wins[i+1]-1+Y.shape[0], nDims[i+1]))
                 mean[:] = np.random.randn(*mean.shape)*0.01
-        var = np.zeros((wins[i+1]-1+Y.shape[0],Y.shape[1]))+X_variance
-        Xs.append(NormalPosterior(mean,var))
+                var = np.zeros((wins[i+1]-1+Y.shape[0],nDims[i+1]))+X_variance
+                Xs.append(NormalPosterior(mean,var))
         return Xs
         
     def log_likelihood(self):
