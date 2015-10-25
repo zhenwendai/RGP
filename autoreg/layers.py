@@ -63,8 +63,9 @@ class Layer(SparseGP):
         from GPy.core.parameterization.transformations import Logexp
         X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim
         assert X_win>0, "Neural Network constraints only applies autoregressive structure!"
-        Q = X_win*X_dim+U_win*U_dim
+        Q = X_win*X_dim+U_win*U_dim if self.withControl else X_win*X_dim
         self.init_Xs = [NormalPosterior(self.Xs_flat[i].mean.values[:X_win],self.Xs_flat[i].variance.values[:X_win], name='init_Xs_'+str(i)) for i in range(self.nSeq)]
+        for init_X in self.init_Xs: init_X.mean[:] = np.random.randn(*init_X.shape)*1e-2
         self.encoder = MLP([Q, Q*2, Q+X_dim/2, X_dim] if MLP_dims is None else [Q]+deepcopy(MLP_dims)+[X_dim])
         self.Xs_var = [Param('X_var_'+str(i),self.Xs_flat[i].variance.values[X_win:].copy(), Logexp()) for i in range(self.nSeq)]
 
@@ -139,7 +140,7 @@ class Layer(SparseGP):
         X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim
         for i_seq in range(self.nSeq):
             N = self.Xs_flat[i_seq].shape[0] -  X_win
-            U_offset = -N-U_win+1+self.Us_flat[i_seq].shape[0]
+            if self.withControl: U_offset = -N-U_win+1+self.Us_flat[i_seq].shape[0]
             for n in range(N):
                 if X_win>0:
                     Q = self.X_mean_conv[i_seq].shape[1]
@@ -191,18 +192,18 @@ class Layer(SparseGP):
 
     def _encoder_freerun(self):
         X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim        
-        Q = X_win*X_dim+U_win*U_dim
+        Q = X_win*X_dim+U_win*U_dim if self.withControl else X_win*X_dim
         
         X_in = np.zeros((Q,))
         for i_seq in range(self.nSeq):
             X_flat, init_X, X_var = self.Xs_flat[i_seq], self.init_Xs[i_seq], self.Xs_var[i_seq]
-            U_flat = self.Us_flat[i_seq]
+            if self.withControl: U_flat = self.Us_flat[i_seq]
             X_flat.mean[:X_win] = init_X.mean.values
             X_flat.variance[:X_win] = init_X.variance.values
             X_flat.variance[X_win:] = X_var.values
             
             N = X_flat.shape[0] - X_win
-            U_offset = U_flat.shape[0]-N-U_win+1
+            if self.withControl: U_offset = U_flat.shape[0]-N-U_win+1
             for n in range(N):
                 X_in[:X_win*X_dim] = X_flat.mean[n:n+X_win].flat
                 if self.withControl: 
@@ -213,15 +214,15 @@ class Layer(SparseGP):
     def _encoder_update_gradient(self):
         self.encoder.prepare_grad()        
         X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim        
-        Q = X_win*X_dim+U_win*U_dim
+        Q = X_win*X_dim+U_win*U_dim if self.withControl else X_win*X_dim
         
         X_in = np.zeros((Q,))
         dL =np.zeros((X_dim,))
         for i_seq in range(self.nSeq):
             X_flat, init_X, X_var = self.Xs_flat[i_seq], self.init_Xs[i_seq], self.Xs_var[i_seq]
-            U_flat = self.Us_flat[i_seq]
+            if self.withControl: U_flat = self.Us_flat[i_seq]
             N = X_flat.shape[0] - X_win
-            U_offset = U_flat.shape[0]-N-U_win+1
+            if self.withControl: U_offset = U_flat.shape[0]-N-U_win+1
             
             for n in range(N-1,-1,-1):
                 X_in[:X_win*X_dim] = X_flat.mean[n:n+X_win].flat
@@ -238,7 +239,7 @@ class Layer(SparseGP):
                 
     def freerun(self, init_Xs=None, step=None, U=None, m_match=True):
         X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim
-        Q = X_win*X_dim+U_win*U_dim
+        Q = X_win*X_dim+U_win*U_dim if self.withControl else X_win*X_dim
         if U is None and self.withControl: raise "The model needs control signals!"
         if U is not None and step is None: step=U.shape[0] - U_win
         elif step is None: step=100
