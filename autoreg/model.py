@@ -101,9 +101,9 @@ class DeepAutoreg(Model):
         elif step is None: step=100
         
         con = U
-        con_win = self.layers[0].U_win - 1
+        con_win = self.layers[0].U_win - 1 if self.layers[0].withControl else 0
         for i in range(self.nLayers):
-            con = con[con_win-self.layers[i].U_win+1:]
+            con = con[con_win-self.layers[i].U_win+1:] if self.layers[i].withControl else None
             X = self.layers[i].freerun(init_Xs=None if init_Xs is None else init_Xs[-i-1], step=step,U=con,m_match=m_match)
             con = X
             con_win = self.layers[i].X_win
