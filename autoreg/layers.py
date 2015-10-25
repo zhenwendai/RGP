@@ -274,7 +274,7 @@ class Layer(SparseGP):
         else:
             X = np.empty((X_win+step, X_dim))
             X_in = np.empty((1,Q))
-            if X_win>0: X[:X_win] = init_Xs[-X_win+1:]
+            if X_win>0: X[:X_win] = init_Xs[-X_win:]
             for n in range(step):
                 if X_win>0: X_in[0,:X_win*X_dim] = X[n:n+X_win].flat
                 if self.withControl: X_in[0,X_win*X_dim:] = U[n:n+U_win].flat
