@@ -8,81 +8,83 @@ from GPy import likelihoods
 from GPy import kern
 from GPy.core.parameterization.variational import NormalPosterior, NormalPrior, VariationalPosterior
 from .variational import NormalEntropy,NormalPrior
+from .inference import VarDTC
 
 from .util import get_conv_1D
 
 class Layer(SparseGP):
     
-    def __init__(self, layer_upper, X, X_win=1, U=None, U_win=1, Z=None, num_inducing=10,  kernel=None, inference_method=None, likelihood=None, noise_var=1., back_cstr=False, MLP_dims=None,name='layer'):
+    def __init__(self, layer_upper, Xs, X_win=0, Us=None, U_win=1, Z=None, num_inducing=10,  kernel=None, inference_method=None, likelihood=None, noise_var=1., back_cstr=False, MLP_dims=None,name='layer'):
 
-        self.signal_dim = X.shape[1]
         self.layer_upper = layer_upper
-        self.X_win = X_win # if X_win==1, it is not autoregressive.
-        self.U_win = U_win
-        self.X_dim = X.shape[1]
-        self.U_dim = U.shape[1] if U is not None else None
+        self.nSeq = len(Xs)
         self.back_cstr = back_cstr
+
+        self.X_win = X_win # if X_win==0, it is not autoregressive.        
+        self.X_dim = Xs[0].shape[1]
+        self.Xs_flat = Xs
+        self.X_observed = False if isinstance(Xs[0], VariationalPosterior) else True 
         
-        self.X_flat = X
-        if U is None:
-            self.withControl = False
-            self.U_flat = None
-            self.U_win = 0
-        else:
-            self.withControl = True
-            self.U_flat = U
-        self.X_observed = False if isinstance(X, VariationalPosterior) else True 
-            
-        if self.X_observed:
-            self.Y = X[X_win-1:]
-        else:
-            self.Y = NormalPosterior(X.mean.values[X_win-1:].copy(),X.variance.values[X_win-1:].copy())
-        N = self.Y.shape[0]
-        if not self.X_observed and back_cstr:
-            from .mlp import MLP
-            from copy import deepcopy
-            from GPy.core.parameterization.transformations import Logexp
-            assert self.X_win>1
-            Q = (self.X_win-1+self.U_win)*self.signal_dim
-            self.init_X = NormalPosterior(self.X_flat.mean.values[:self.X_win-1],self.X_flat.variance.values[:self.X_win-1])
-            self.encoder = MLP([Q, Q*2, Q+self.Y.shape[1]/2, self.Y.shape[1]] if MLP_dims is None else [Q]+deepcopy(MLP_dims)+[self.Y.shape[1]])
-            self.var_trans = Logexp()
-            self.X_var = Param('X_var',self.X_flat.variance.values[self.X_win-1:].copy(), Logexp())
-        self._update_conv()
-        if not self.withControl:
-            self.X = NormalPosterior(self.X_mean_conv.copy(),self.X_var_conv.copy())
-        elif X_win==1:
-            self.X = NormalPosterior(self.U_mean_conv.copy(),self.U_var_conv.copy())
-        else:
-            self.X = NormalPosterior(np.hstack([self.X_mean_conv.copy(),self.U_mean_conv.copy()]),
-                                     np.hstack([self.X_var_conv.copy().copy(),self.U_var_conv.copy()]))
+        self.withControl = Us is not None
+        self.U_win = U_win
+        self.U_dim = Us[0].shape[1] if self.withControl else None
+        self.Us_flat = Us
+        if self.withControl: assert len(Xs)==len(Us), "The number of signals should be equal to the number controls!"
+        
+        if not self.X_observed and back_cstr: self._init_encoder(MLP_dims)
+        self._init_XY()
         
         if Z is None:
-            Z = np.random.permutation(self.X.mean.values.copy())[:num_inducing]
-#             from sklearn.cluster import KMeans
-#             m = KMeans(n_clusters=num_inducing,n_init=1000,max_iter=100)
-#             m.fit(self.X.mean.values.copy())
-#             Z = m.cluster_centers_.copy()
+            if back_cstr:
+                Z = np.random.randn(num_inducing,self.X.shape[1])
+            else:
+                from sklearn.cluster import KMeans
+                m = KMeans(n_clusters=num_inducing,n_init=1000,max_iter=100)
+                m.fit(self.X.mean.values.copy())
+                Z = m.cluster_centers_.copy()
         assert Z.shape[1] == self.X.shape[1]
         
         if kernel is None: kernel = kern.RBF(self.X.shape[1], ARD = True)
         
-        if inference_method is None: 
-            from .inference import VarDTC
-            inference_method = VarDTC()
+        if inference_method is None: inference_method = VarDTC()
         if likelihood is None: likelihood = likelihoods.Gaussian(variance=noise_var)
-        self.normalPrior = NormalPrior()
-        self.normalEntropy = NormalEntropy()
+        self.normalPrior, self.normalEntropy = NormalPrior(), NormalEntropy()
         super(Layer, self).__init__(self.X, self.Y, Z, kernel, likelihood, inference_method=inference_method, name=name)
         if not self.X_observed: 
             if back_cstr:
-                from .mlp import MLP
-                from copy import deepcopy
-                from GPy.core.parameterization.transformations import Logexp
-                assert self.X_win>1
-                self.link_parameters(self.init_X, self.encoder, self.X_var)
+                assert self.X_win>0
+                self.link_parameters(*(self.init_Xs + self.Xs_var+[self.encoder]))
             else:
-                self.link_parameter(self.X_flat)
+                self.link_parameters(*self.Xs_flat)
+                
+    def _init_encoder(self, MLP_dims):
+        from .mlp import MLP
+        from copy import deepcopy
+        from GPy.core.parameterization.transformations import Logexp
+        X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim
+        assert X_win>0, "Neural Network constraints only applies autoregressive structure!"
+        Q = X_win*X_dim+U_win*U_dim
+        self.init_Xs = [NormalPosterior(self.Xs_flat[i].mean.values[:X_win],self.Xs_flat[i].variance.values[:X_win], name='init_Xs_'+str(i)) for i in range(self.nSeq)]
+        self.encoder = MLP([Q, Q*2, Q+X_dim/2, X_dim] if MLP_dims is None else [Q]+deepcopy(MLP_dims)+[X_dim])
+        self.Xs_var = [Param('X_var_'+str(i),self.Xs_flat[i].variance.values[X_win:].copy(), Logexp()) for i in range(self.nSeq)]
+
+    def _init_XY(self):
+        X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim
+        self._update_conv()
+        if X_win>0: X_mean_conv, X_var_conv = np.vstack(self.X_mean_conv), np.vstack(self.X_var_conv)
+        if self.withControl: U_mean_conv, U_var_conv = np.vstack(self.U_mean_conv), np.vstack(self.U_var_conv)
+        
+        if not self.withControl:
+            self.X = NormalPosterior(X_mean_conv, X_var_conv)
+        elif X_win==0:
+            self.X = NormalPosterior(U_mean_conv, U_var_conv)
+        else:
+            self.X = NormalPosterior(np.hstack([X_mean_conv, U_mean_conv]), np.hstack([X_var_conv, U_var_conv]))
+
+        if self.X_observed:
+            self.Y = np.vstack([x[X_win:] for x in self.Xs_flat])
+        else:
+            self.Y = NormalPosterior(np.vstack([x.mean.values[X_win:] for x in self.Xs_flat]), np.vstack([x.variance.values[X_win:] for x in self.Xs_flat]))
     
     def plot_latent(self, labels=None, which_indices=None,
                 resolution=50, ax=None, marker='o', s=40,
@@ -99,53 +101,55 @@ class Layer(SparseGP):
                 plot_limits, aspect, updates, predict_kwargs, imshow_kwargs)
 
     def _update_conv(self):
+        X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim
         if self.back_cstr: self._encoder_freerun()
-        N = self.Y.shape[0]
-        if not self.withControl:
-            self.X_mean_conv = get_conv_1D(self.X_flat.mean.values[:-1], self.X_win-1).reshape(N,-1)
-            self.X_var_conv = get_conv_1D(self.X_flat.variance.values[:-1], self.X_win-1).reshape(N,-1)
-        elif self.X_win==1:
-            self.U_mean_conv = get_conv_1D(self.U_flat.mean.values[-N-self.U_win+1:], self.U_win).reshape(N,-1)
-            self.U_var_conv = get_conv_1D(self.U_flat.variance.values[-N-self.U_win+1:], self.U_win).reshape(N,-1)
-        else:
-            self.X_mean_conv = get_conv_1D(self.X_flat.mean.values[:-1], self.X_win-1).reshape(N,-1)
-            self.X_var_conv = get_conv_1D(self.X_flat.variance.values[:-1], self.X_win-1).reshape(N,-1)
-            self.U_mean_conv = get_conv_1D(self.U_flat.mean.values[-N-self.U_win+1:], self.U_win).reshape(N,-1)
-            self.U_var_conv = get_conv_1D(self.U_flat.variance.values[-N-self.U_win+1:], self.U_win).reshape(N,-1)
+        self.X_mean_conv, self.X_var_conv, self.U_mean_conv, self.U_var_conv = [], [], [], []
+        for i_seq in range(self.nSeq):
+            N = self.Xs_flat[i_seq].shape[0]-X_win
+            if X_win>0:
+                self.X_mean_conv.append(get_conv_1D(self.Xs_flat[i_seq].mean.values[:-1], X_win).reshape(N,-1))
+                self.X_var_conv.append(get_conv_1D(self.Xs_flat[i_seq].variance.values[:-1], X_win).reshape(N,-1))
+            if self.withControl:
+                self.U_mean_conv.append(get_conv_1D(self.Us_flat[i_seq].mean.values[-N-U_win+1:], U_win).reshape(N,-1))
+                self.U_var_conv.append(get_conv_1D(self.Us_flat[i_seq].variance.values[-N-U_win+1:], U_win).reshape(N,-1))
     
     def _update_X(self):
         self._update_conv()
-        if not self.X_observed:
-            self.Y.mean[:] = self.X_flat.mean[self.X_win-1:]
-            self.Y.variance[:] = self.X_flat.variance[self.X_win-1:]
-        if not self.withControl:
-            self.X.mean[:] = self.X_mean_conv
-            self.X.variance[:] = self.X_var_conv
-        elif self.X_win==1:
-            self.X.mean[:] = self.U_mean_conv
-            self.X.variance[:] = self.U_var_conv
-        else:
-            self.X.mean[:,:self.X_mean_conv.shape[1]] = self.X_mean_conv
-            self.X.variance[:,:self.X_mean_conv.shape[1]] = self.X_var_conv
-            self.X.mean[:,self.X_mean_conv.shape[1]:] = self.U_mean_conv
-            self.X.variance[:,self.X_mean_conv.shape[1]:] = self.U_var_conv
+        X_offset, Y_offset = 0, 0
+        for i_seq in range(self.nSeq):
+            if self.X_win>0:
+                N, Q = self.X_mean_conv[i_seq].shape
+                self.X.mean[X_offset:X_offset+N, :Q] = self.X_mean_conv[i_seq]
+                self.X.variance[X_offset:X_offset+N, :Q] = self.X_var_conv[i_seq]
+            else: Q=0
+            if self.withControl:
+                N = self.U_mean_conv[i_seq].shape[0]
+                self.X.mean[X_offset:X_offset+N, Q:] = self.U_mean_conv[i_seq]
+                self.X.variance[X_offset:X_offset+N, Q:] = self.U_var_conv[i_seq]
+            X_offset += N
+            
+            if not self.X_observed:
+                N = self.Xs_flat[i_seq].shape[0]-self.X_win
+                self.Y.mean[Y_offset:Y_offset+N] = self.Xs_flat[i_seq].mean[self.X_win:]
+                self.Y.variance[Y_offset:Y_offset+N] = self.Xs_flat[i_seq].variance[self.X_win:]
+                Y_offset += N
             
     def update_latent_gradients(self):
-        N = self.Y.shape[0]
-        for n in xrange(self.X.shape[0]):
-            if not self.withControl:
-                self.X_flat.mean.gradient[n:n+self.X_win-1] += self.X.mean.gradient[n].reshape(-1,self.X_dim)
-                self.X_flat.variance.gradient[n:n+self.X_win-1] += self.X.variance.gradient[n].reshape(-1,self.X_dim)
-            elif self.X_win==1:
-                offset = -N-self.U_win+1+self.U_flat.shape[0]
-                self.U_flat.mean.gradient[offset+n:offset+n+self.U_win] += self.X.mean.gradient[n].reshape(-1,self.U_dim)
-                self.U_flat.variance.gradient[offset+n:offset+n+self.U_win] += self.X.variance.gradient[n].reshape(-1,self.U_dim)
-            else:
-                offset = -N-self.U_win+1+self.U_flat.shape[0]
-                self.X_flat.mean.gradient[n:n+self.X_win-1] += self.X.mean.gradient[n,:self.X_mean_conv.shape[1]].reshape(-1,self.X_dim)
-                self.X_flat.variance.gradient[n:n+self.X_win-1] += self.X.variance.gradient[n,:self.X_mean_conv.shape[1]].reshape(-1,self.X_dim)
-                self.U_flat.mean.gradient[offset+n:offset+n+self.U_win] += self.X.mean.gradient[n,self.X_mean_conv.shape[1]:].reshape(-1,self.U_dim)
-                self.U_flat.variance.gradient[offset+n:offset+n+self.U_win] += self.X.variance.gradient[n,self.X_mean_conv.shape[1]:].reshape(-1,self.U_dim)
+        X_offset = 0
+        X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim
+        for i_seq in range(self.nSeq):
+            N = self.Xs_flat[i_seq].shape[0] -  X_win
+            U_offset = -N-U_win+1+self.Us_flat[i_seq].shape[0]
+            for n in range(N):
+                if X_win>0:
+                    Q = self.X_mean_conv[i_seq].shape[1]
+                    self.Xs_flat[i_seq].mean.gradient[n:n+X_win] += self.X.mean.gradient[X_offset+n,:Q].reshape(-1, X_dim)
+                    self.Xs_flat[i_seq].variance.gradient[n:n+X_win] += self.X.variance.gradient[X_offset+n,:Q].reshape(-1, X_dim)
+                else: Q=0
+                if self.withControl:
+                    self.Us_flat[i_seq].mean.gradient[U_offset+n:U_offset+n+U_win] += self.X.mean.gradient[X_offset+n,Q:].reshape(-1, U_dim)
+                    self.Us_flat[i_seq].variance.gradient[U_offset+n:U_offset+n+U_win] += self.X.variance.gradient[X_offset+n,Q:].reshape(-1, U_dim)
+            X_offset += N
         if self.back_cstr: self._encoder_update_gradient()
     
     def _update_qX_gradients(self):
@@ -155,109 +159,124 @@ class Layer(SparseGP):
                                             dL_dpsi0=self.grad_dict['dL_dpsi0'],
                                             dL_dpsi1=self.grad_dict['dL_dpsi1'],
                                             dL_dpsi2=self.grad_dict['dL_dpsi2'])
-        
+    
+    def _prepare_gradients(self):
+        X_win = self.X_win
+        if self.withControl and self.layer_upper is None:
+            for U in self.Us_flat:
+                U.mean.gradient[:] = 0
+                U.variance.gradient[:] = 0
+        if not self.X_observed: 
+            Y_offset = 0
+            delta = 0
+            for X in self.Xs_flat:
+                N = X.shape[0] - X_win
+                X.mean.gradient[:] = 0
+                X.variance.gradient[:] = 0
+                X.mean.gradient[X_win:] += self.grad_dict['dL_dYmean'][Y_offset:Y_offset+N]
+                X.variance.gradient[X_win:] += self.grad_dict['dL_dYvar'][Y_offset:Y_offset+N,None]
+                if X_win>0:
+                    delta += -self.normalPrior.comp_value(X[:X_win])
+                    self.normalPrior.update_gradients(X[:X_win])
+                delta += -self.normalEntropy.comp_value(X[X_win:])
+                self.normalEntropy.update_gradients(X[X_win:])
+                Y_offset += N
+            self._log_marginal_likelihood += delta
+                
     def parameters_changed(self):
         self._update_X()
         super(Layer,self).parameters_changed()
         self._update_qX_gradients()
-        if self.withControl and self.layer_upper is None:
-            self.U_flat.mean.gradient[:] = 0
-            self.U_flat.variance.gradient[:] = 0
-        if not self.X_observed: 
-            self.X_flat.mean.gradient[:] = 0.
-            self.X_flat.variance.gradient[:] = 0.
-        if not self.X_observed:
-            self.X_flat.mean.gradient[self.X_win-1:] += self.grad_dict['dL_dYmean']
-            self.X_flat.variance.gradient[self.X_win-1:] += self.grad_dict['dL_dYvar'][:,None]
-            
-            delta = 0
-            if self.X_win>1:
-                delta += -self.normalPrior.comp_value(self.X_flat[:self.X_win-1])
-                self.normalPrior.update_gradients(self.X_flat[:self.X_win-1])
-            delta += -self.normalEntropy.comp_value(self.X_flat[self.X_win-1:])
-            self.normalEntropy.update_gradients(self.X_flat[self.X_win-1:])
-            self._log_marginal_likelihood += delta
+        self._prepare_gradients()
 
     def _encoder_freerun(self):
-        Q, N = self.signal_dim, self.X_flat.shape[0]-self.X_win+1
-        X_win, U_win = self.X_win, self.U_win
-        X_dim = (X_win-1+U_win)*Q
-        Y_dim = Q
-
-        self.X_flat.variance[:X_win-1] = self.init_X.variance.values
-        self.X_flat.variance[X_win-1:] = self.X_var.values
-        self.X_flat.mean[:X_win-1] = self.init_X.mean.values
-        X_in = np.zeros((X_dim,))
-        U_offset = self.U_flat.shape[0]-N-U_win+1
-        for n in range(N):
-            X_in[:(X_win-1)*Q] = self.X_flat.mean[n:n+X_win-1].flat
-            if self.withControl: 
-                X_in[(X_win-1)*Q:X_dim] = self.U_flat.mean[U_offset+n:U_offset+n+U_win].flat
-            X_out = self.encoder.predict(X_in[None,:])
-            self.X_flat.mean[X_win-1+n] = X_out[0,:Y_dim].reshape(-1,Q)
+        X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim        
+        Q = X_win*X_dim+U_win*U_dim
+        
+        X_in = np.zeros((Q,))
+        for i_seq in range(self.nSeq):
+            X_flat, init_X, X_var = self.Xs_flat[i_seq], self.init_Xs[i_seq], self.Xs_var[i_seq]
+            U_flat = self.Us_flat[i_seq]
+            X_flat.mean[:X_win] = init_X.mean.values
+            X_flat.variance[:X_win] = init_X.variance.values
+            X_flat.variance[X_win:] = X_var.values
+            
+            N = X_flat.shape[0] - X_win
+            U_offset = U_flat.shape[0]-N-U_win+1
+            for n in range(N):
+                X_in[:X_win*X_dim] = X_flat.mean[n:n+X_win].flat
+                if self.withControl: 
+                    X_in[X_win*X_dim:] = U_flat.mean[U_offset+n:U_offset+n+U_win].flat
+                X_out = self.encoder.predict(X_in[None,:])
+                X_flat.mean[X_win+n] = X_out[0]
     
     def _encoder_update_gradient(self):
-        self.encoder.prepare_grad()
-        Q, N = self.signal_dim, self.X_flat.shape[0]-self.X_win+1
-        X_win, U_win = self.X_win, self.U_win
-        X_dim = self.X.shape[1]
-        Y_dim = self.Y.shape[1]
-
-        X_in = np.zeros((X_dim,))
-        dL = np.zeros((Y_dim,))
-        U_offset = self.U_flat.shape[0]-N-U_win+1
-        for n in range(self.Y.shape[0]-1,-1,-1):
-            X_in[:X_dim] = self.X.mean[n]
-            dL[:Y_dim] = self.X_flat.mean.gradient[X_win-1+n].flat
-            dX = self.encoder.update_gradient(X_in[None,:], dL[None,:])
-            self.X_flat.mean.gradient[n:n+X_win-1] += dX[0,:(X_win-1)*Q].reshape(-1,Q)
-            if self.withControl:
-                self.U_flat.mean.gradient[U_offset+n:U_offset+n+U_win] += dX[0,(X_win-1)*Q:X_dim].reshape(-1,Q)
-        self.init_X.mean.gradient[:] = self.X_flat.mean.gradient[:X_win-1]
-        self.X_var.gradient[:] = self.X_flat.variance.gradient[X_win-1:]
-        self.init_X.variance.gradient[:] = self.X_flat.variance.gradient[:X_win-1]
+        self.encoder.prepare_grad()        
+        X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim        
+        Q = X_win*X_dim+U_win*U_dim
         
+        X_in = np.zeros((Q,))
+        dL =np.zeros((X_dim,))
+        for i_seq in range(self.nSeq):
+            X_flat, init_X, X_var = self.Xs_flat[i_seq], self.init_Xs[i_seq], self.Xs_var[i_seq]
+            U_flat = self.Us_flat[i_seq]
+            N = X_flat.shape[0] - X_win
+            U_offset = U_flat.shape[0]-N-U_win+1
+            
+            for n in range(N-1,-1,-1):
+                X_in[:X_win*X_dim] = X_flat.mean[n:n+X_win].flat
+                if self.withControl: 
+                    X_in[X_win*X_dim:] = U_flat.mean[U_offset+n:U_offset+n+U_win].flat
+                dL[:] = X_flat.mean.gradient[X_win+n].flat
+                dX = self.encoder.update_gradient(X_in[None,:], dL[None,:])
+                X_flat.mean.gradient[n:n+X_win] += dX[0,:X_win*X_dim].reshape(-1,X_dim)
+                if self.withControl:
+                    U_flat.mean.gradient[U_offset+n:U_offset+n+U_win] += dX[0, X_win*X_dim:].reshape(-1,U_dim)
+            init_X.mean.gradient[:] = X_flat.mean.gradient[:X_win]
+            init_X.variance.gradient[:] = X_flat.variance.gradient[:X_win]
+            X_var.gradient[:] = X_flat.variance.gradient[X_win:]
+                
     def freerun(self, init_Xs=None, step=None, U=None, m_match=True):
+        X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim
+        Q = X_win*X_dim+U_win*U_dim
         if U is None and self.withControl: raise "The model needs control signals!"
-        if U is not None and step is None: step=U.shape[0] - self.U_win
+        if U is not None and step is None: step=U.shape[0] - U_win
         elif step is None: step=100
-        if init_Xs is None and self.X_win>1:
+        if init_Xs is None and X_win>0:
             if m_match:
-                init_Xs = NormalPosterior(np.zeros((self.X_win-1,self.X_flat.shape[1])),np.ones((self.X_win-1,self.X_flat.shape[1]))*1)
+                init_Xs = NormalPosterior(np.zeros((X_win,X_dim)),np.ones((X_win,X_dim)))
             else:
-                init_Xs = np.zeros((self.X_win-1,self.X_flat.shape[1])) 
-        QX, QU = self.X_dim, self.U_dim
-        X_win, U_win = self.X_win, self.U_win
+                init_Xs = np.zeros((X_win,X_dim))
+        if U is not None: assert U.shape[1]==U_dim, "The dimensionality of control signal has to be "+str(U_dim)+"!"
         
-        if m_match:
-            X = NormalPosterior(np.empty((X_win-1+step, self.X_flat.shape[1])),np.ones((X_win-1+step, self.X_flat.shape[1])))
-            if X_win>1:
-                X.mean[:X_win-1] = init_Xs.mean[-X_win+1:]
-                X.variance[:X_win-1] = init_Xs.variance[-X_win+1:]
-            X_in =NormalPosterior(np.empty((1, self.X.mean.shape[1])),np.ones((1, self.X.mean.shape[1])))
+        if m_match: # free run with moment matching
+            X = NormalPosterior(np.empty((X_win+step, X_dim)),np.ones((X_win+step, X_dim)))
+            if X_win>0:
+                X.mean[:X_win] = init_Xs.mean[-X_win:]
+                X.variance[:X_win] = init_Xs.variance[-X_win:]
+            X_in =NormalPosterior(np.empty((1, Q)),np.ones((1, Q)))
             X_in.variance[:] = 1e-10
             for n in range(step):
-                if X_win>1:
-                    X_in.mean[0,:(X_win-1)*QX] = X.mean[n:n+X_win-1].flat
-                    X_in.variance[0,:(X_win-1)*QX] = X.variance[n:n+X_win-1].flat
+                if X_win>0:
+                    X_in.mean[0,:X_win*X_dim] = X.mean[n:n+X_win].flat
+                    X_in.variance[0,:X_win*X_dim] = X.variance[n:n+X_win].flat
                 if self.withControl: 
                     if isinstance(U, NormalPosterior):
-                        X_in.mean[0,(X_win-1)*QU:] = U.mean[n:n+U_win].flat
-                        X_in.variance[0,(X_win-1)*QU:] = U.variance[n:n+U_win].flat
+                        X_in.mean[0,X_win*X_dim:] = U.mean[n:n+U_win].flat
+                        X_in.variance[0,X_win*X_dim:] = U.variance[n:n+U_win].flat
                     else:
-                        X_in.mean[0,(X_win-1)*QU:] = U[n:n+U_win].flat
+                        X_in.mean[0,X_win*X_dim:] = U[n:n+U_win].flat
                 X_out = self._raw_predict(X_in)
-                X.mean[X_win-1+n] = X_out[0]
-                if np.any(X_out[1]<=0.): print X_out[1]
-                X.variance[X_win-1+n] = X_out[1]
+                X.mean[X_win+n] = X_out[0]
+                if np.any(X_out[1]<=0.): X_out[1][X_out[1]<=0.] = 1e-10
+                X.variance[X_win+n] = X_out[1]
         else:
-            X = np.empty((X_win-1+step, self.X_flat.shape[1]))
-            X_in = np.empty((1,self.X.mean.shape[1]))
-            if X_win>1: # depends on history                
-                X[:X_win-1] = init_Xs[-X_win+1:]
+            X = np.empty((X_win+step, X_dim))
+            X_in = np.empty((1,Q))
+            if X_win>0: X[:X_win] = init_Xs[-X_win+1:]
             for n in range(step):
-                if X_win>1: X_in[0,:(X_win-1)*QX] = X[n:n+X_win-1].flat
-                if self.withControl: X_in[0,(X_win-1)*QU:] = U[n:n+U_win].flat
-                X[X_win-1+n] = self._raw_predict(X_in)[0]
+                if X_win>0: X_in[0,:X_win*X_dim] = X[n:n+X_win].flat
+                if self.withControl: X_in[0,X_win*X_dim:] = U[n:n+U_win].flat
+                X[X_win+n] = self._raw_predict(X_in)[0]
         return X
 
