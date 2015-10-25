@@ -34,7 +34,7 @@ class DeepAutoreg(Model):
             self.Ys = []
             for i in range(len(Ys)):
                 Y, U = Ys[i], Us[i]
-                assert Y.shape[0]==U.shape[0], "the signal and control should be aligned."
+#                 assert Y.shape[0]==U.shape[0], "the signal and control should be aligned."
                 if U_pre_step:
                     U = U[:-1].copy()
                     Y = Y[U_win:].copy()
