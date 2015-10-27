@@ -18,7 +18,6 @@ class Layer(SparseGP):
 
         self.layer_upper = layer_upper
         self.nSeq = len(Xs)
-        self.back_cstr = back_cstr
 
         self.X_win = X_win # if X_win==0, it is not autoregressive.        
         self.X_dim = Xs[0].shape[1]
@@ -31,7 +30,8 @@ class Layer(SparseGP):
         self.Us_flat = Us
         if self.withControl: assert len(Xs)==len(Us), "The number of signals should be equal to the number controls!"
         
-        if not self.X_observed and back_cstr: self._init_encoder(MLP_dims)
+        if not self.X_observed and back_cstr: self._init_encoder(MLP_dims); self.back_cstr = True
+        else: self.back_cstr = False
         self._init_XY()
         
         if Z is None:
