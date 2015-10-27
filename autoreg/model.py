@@ -57,7 +57,7 @@ class DeepAutoreg(Model):
             if i==self.nLayers-1:
                 self.layers.append(Layer(None, self.Xs[i-1], X_win=wins[i], Us=self.Us, U_win=U_win, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i),  back_cstr=back_cstr, MLP_dims=MLP_dims))
             elif i==0:
-                self.layers.append(Layer(self.layers[-1], self.Ys, X_win=wins[i], Us=self.Xs[i], U_win=wins[i+1], num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, likelihood=likelihood, noise_var=1., name='layer_'+str(i)))
+                self.layers.append(Layer(self.layers[-1], self.Ys, X_win=wins[i], Us=self.Xs[i], U_win=wins[i+1], num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, likelihood=likelihood, noise_var=1., back_cstr=back_cstr, name='layer_'+str(i)))
             else:
                 self.layers.append(Layer(self.layers[-1], self.Xs[i-1], X_win=wins[i], Us=self.Xs[i], U_win=wins[i+1], num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i), back_cstr=back_cstr, MLP_dims=MLP_dims))
         self.link_parameters(*self.layers)
