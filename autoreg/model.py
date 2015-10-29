@@ -94,7 +94,7 @@ class DeepAutoreg(Model):
         self._log_marginal_likelihood = np.sum([l._log_marginal_likelihood for l in self.layers])
         [l.update_latent_gradients() for l in self.layers[::-1]]
         
-    def freerun(self, init_Xs=None, step=None, U=None, m_match=True):
+    def freerun(self, init_Xs=None, step=None, U=None, m_match=True, encoder=False):
         assert self.U_pre_step, "The other case is not implemented yet!"
         if U is None and self.layers[0].withControl: raise "The model needs control signals!"
         if U is not None and step is None: step=U.shape[0] - self.layers[0].U_win
@@ -104,7 +104,7 @@ class DeepAutoreg(Model):
         con_win = self.layers[0].U_win - 1 if self.layers[0].withControl else 0
         for i in range(self.nLayers):
             con = con[con_win-self.layers[i].U_win+1:] if self.layers[i].withControl else None
-            X = self.layers[i].freerun(init_Xs=None if init_Xs is None else init_Xs[-i-1], step=step,U=con,m_match=m_match)
+            X = self.layers[i].freerun(init_Xs=None if init_Xs is None else init_Xs[-i-1], step=step,U=con,m_match=m_match, encoder=encoder)
             con = X
             con_win = self.layers[i].X_win
         return X

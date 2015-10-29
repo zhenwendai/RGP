@@ -213,7 +213,7 @@ class Layer(SparseGP):
     
     def _encoder_update_gradient(self):
         self.encoder.prepare_grad()        
-        X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim        
+        X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim
         Q = X_win*X_dim+U_win*U_dim if self.withControl else X_win*X_dim
         
         X_in = np.zeros((Q,))
@@ -237,7 +237,7 @@ class Layer(SparseGP):
             init_X.variance.gradient[:] = X_flat.variance.gradient[:X_win]
             X_var.gradient[:] = X_flat.variance.gradient[X_win:]
                 
-    def freerun(self, init_Xs=None, step=None, U=None, m_match=True):
+    def freerun(self, init_Xs=None, step=None, U=None, m_match=True, encoder=False):
         X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim
         Q = X_win*X_dim+U_win*U_dim if self.withControl else X_win*X_dim
         if U is None and self.withControl: raise "The model needs control signals!"
@@ -249,6 +249,7 @@ class Layer(SparseGP):
             else:
                 init_Xs = np.zeros((X_win,X_dim))
         if U is not None: assert U.shape[1]==U_dim, "The dimensionality of control signal has to be "+str(U_dim)+"!"
+        encoder = encoder and self.back_cstr
         
         if m_match: # free run with moment matching
             X = NormalPosterior(np.empty((X_win+step, X_dim)),np.ones((X_win+step, X_dim)))
@@ -271,6 +272,14 @@ class Layer(SparseGP):
                 X.mean[X_win+n] = X_out[0]
                 if np.any(X_out[1]<=0.): X_out[1][X_out[1]<=0.] = 1e-10
                 X.variance[X_win+n] = X_out[1]
+        elif encoder:
+            X = np.empty((X_win+step, X_dim))
+            X_in = np.empty((1,Q))
+            if X_win>0: X[:X_win] = init_Xs[-X_win:]
+            for n in range(step):
+                if X_win>0: X_in[0,:X_win*X_dim] = X[n:n+X_win].flat
+                if self.withControl: X_in[0,X_win*X_dim:] = U[n:n+U_win].flat
+                X[X_win+n] = self.encoder.predict(X_in)[0]
         else:
             X = np.empty((X_win+step, X_dim))
             X_in = np.empty((1,Q))
