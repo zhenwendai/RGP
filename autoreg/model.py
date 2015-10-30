@@ -13,7 +13,9 @@ class DeepAutoreg(Model):
     :type U_pre_step: Boolean
     """
     
-    def __init__(self, wins, Y, U=None, U_win=1, nDims=None, X_variance=0.01, num_inducing=10, likelihood = None, name='autoreg', kernels=None, U_pre_step=True, init='Y', back_cstr=False, MLP_dims=None):
+    def __init__(self, wins, Y, U=None, U_win=1, nDims=None, X_variance=0.01, num_inducing=10, 
+                 likelihood = None, name='autoreg', kernels=None, U_pre_step=True, init='Y', 
+                 inducing_init='kmeans', back_cstr=False, MLP_dims=None):
         super(DeepAutoreg, self).__init__(name=name)
         Ys, Us = Y,U
         if isinstance(Ys, np.ndarray): Ys = [Ys]
@@ -55,11 +57,11 @@ class DeepAutoreg(Model):
         self.layers = []
         for i in range(self.nLayers-1,-1,-1):
             if i==self.nLayers-1:
-                self.layers.append(Layer(None, self.Xs[i-1], X_win=wins[i], Us=self.Us, U_win=U_win, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i),  back_cstr=back_cstr, MLP_dims=MLP_dims))
+                self.layers.append(Layer(None, self.Xs[i-1], X_win=wins[i], Us=self.Us, U_win=U_win, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i),  back_cstr=back_cstr, MLP_dims=MLP_dims, inducing_init=inducing_init))
             elif i==0:
-                self.layers.append(Layer(self.layers[-1], self.Ys, X_win=wins[i], Us=self.Xs[i], U_win=wins[i+1], num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, likelihood=likelihood, noise_var=1., back_cstr=back_cstr, name='layer_'+str(i)))
+                self.layers.append(Layer(self.layers[-1], self.Ys, X_win=wins[i], Us=self.Xs[i], U_win=wins[i+1], num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, likelihood=likelihood, noise_var=1., back_cstr=back_cstr, name='layer_'+str(i), inducing_init=inducing_init))
             else:
-                self.layers.append(Layer(self.layers[-1], self.Xs[i-1], X_win=wins[i], Us=self.Xs[i], U_win=wins[i+1], num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i), back_cstr=back_cstr, MLP_dims=MLP_dims))
+                self.layers.append(Layer(self.layers[-1], self.Xs[i-1], X_win=wins[i], Us=self.Xs[i], U_win=wins[i+1], num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, noise_var=0.01, name='layer_'+str(i), back_cstr=back_cstr, MLP_dims=MLP_dims, inducing_init=inducing_init))
         self.link_parameters(*self.layers)
             
     def _init_X(self, wins, Ys, Us, X_variance, nDims, init='Y'):
