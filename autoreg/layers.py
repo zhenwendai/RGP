@@ -37,7 +37,7 @@ class Layer(SparseGP):
         self._init_XY()
         
         if Z is None:
-            if back_cstr and inducing_init=='kmeans':
+            if not back_cstr and inducing_init=='kmeans':
                 from sklearn.cluster import KMeans
                 m = KMeans(n_clusters=num_inducing,n_init=1000,max_iter=100)
                 m.fit(self.X.mean.values.copy())
