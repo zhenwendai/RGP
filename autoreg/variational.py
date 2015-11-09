@@ -6,10 +6,10 @@ class NormalEntropy(object):
     
     def comp_value(self, variational_posterior):
         var = variational_posterior.variance
-        return (NormalEntropy.constant+np.log(var)).sum()/2.
+        return -(NormalEntropy.constant+np.log(var)).sum()/2.
 
     def update_gradients(self, variational_posterior):
-        variational_posterior.variance.gradient +=  -1. / (variational_posterior.variance*2.)
+        variational_posterior.variance.gradient +=  1. / (variational_posterior.variance*2.)
         
 class NormalPrior(object):
     
