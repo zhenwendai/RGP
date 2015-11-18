@@ -22,7 +22,9 @@ xx,yy = transformTimeSeriesToSeq(Y1, ws)
 #uu,tmp = transformTimeSeriesToSeq(U1, ws)
 # Test the above: np.sin(uu) - xx
 
-uu = yy**2 -2*yy + 5 + np.random.randn(*yy.shape) * 0.005
+#uu = yy**2 -2*yy + 5 + np.random.randn(*yy.shape) * 0.005
+U1 = Y1**2 -2*Y1 + 5 + np.random.randn(*Y1.shape) * 0.005
+uu,tmp = transformTimeSeriesToSeq(U1, ws)
 
 Xtr = xx[0:50,:]
 Xts = xx[50:,:]
