@@ -1,4 +1,5 @@
 from gpnarx import *
+import pylab as pb
 
 num_inducing = 40
 
@@ -15,13 +16,13 @@ m1.optimize('bfgs', max_iters=100)
 m1.plot()
 
 # Create transformed data (autoregressive dataset)
-ws=15 # Windowsize
+ws=10 # Windowsize
 xx,yy = transformTimeSeriesToSeq(Y1, ws)
 
 #uu,tmp = transformTimeSeriesToSeq(U1, ws)
 # Test the above: np.sin(uu) - xx
 
-uu = yy**2 -2*yy + 5
+uu = yy**2 -2*yy + 5 + np.random.randn(*yy.shape) * 0.005
 
 Xtr = xx[0:50,:]
 Xts = xx[50:,:]
@@ -44,3 +45,45 @@ ygp, varygp = gp_narx(m, x_start, Yts.shape[0], Uts, ws)
 pb.figure()
 pb.plot(Yts, 'x-')
 pb.plot(ygp, 'ro-')
+pb.legend(('True','Pred'))
+pb.title('NARX-full')
+
+Xrand = np.random.randn(*Xtr.shape)
+mrandx = GPy.models.SparseGPRegression(np.hstack((Xrand,Utr)),Ytr, num_inducing = num_inducing)
+mrandx.optimize('bfgs', max_iters=1000, messages=True)
+print mrandx
+
+# Free simulation
+ygp, varygp = gp_narx(mrandx, x_start, Yts.shape[0], Uts, ws)
+pb.figure()
+pb.plot(Yts, 'x-')
+pb.plot(ygp, 'ro-')
+pb.legend(('True','Pred'))
+pb.title('NARX-RAND_X')
+
+
+Urand = np.random.randn(*Utr.shape)
+mrandu = GPy.models.SparseGPRegression(np.hstack((Xtr,Urand)),Ytr, num_inducing = num_inducing)
+mrandu.optimize('bfgs', max_iters=1000, messages=True)
+print mrandu
+
+# Free simulation
+ygp, varygp = gp_narx(mrandu, x_start, Yts.shape[0], Uts, ws)
+pb.figure()
+pb.plot(Yts, 'x-')
+pb.plot(ygp, 'ro-')
+pb.legend(('True','Pred'))
+pb.title('NARX-RAND_U')
+
+
+mrandxu = GPy.models.SparseGPRegression(np.hstack((Xrand,Urand)),Ytr, num_inducing = num_inducing)
+mrandxu.optimize('bfgs', max_iters=1000, messages=True)
+print mrandxu
+
+# Free simulation
+ygp, varygp = gp_narx(mrandxu, x_start, Yts.shape[0], Uts, ws)
+pb.figure()
+pb.plot(Yts, 'x-')
+pb.plot(ygp, 'ro-')
+pb.legend(('True','Pred'))
+pb.title('NARX-RAND_X_U')
