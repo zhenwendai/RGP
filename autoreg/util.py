@@ -1,7 +1,7 @@
 
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
-from GPy.core.parameterization.transformations import Transformation, _lim_val, epsilon
+from paramz.transformations import Transformation, _lim_val, epsilon
 
 def get_conv_1D(arr, win):
     assert win>0
