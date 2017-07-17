@@ -17,6 +17,8 @@ class DeepAutoreg(Model):
                  likelihood = None, name='autoreg', kernels=None, U_pre_step=True, init='Y', 
                  inducing_init='kmeans', back_cstr=False, MLP_dims=None):
         super(DeepAutoreg, self).__init__(name=name)
+        
+        import pdb; pdb.set_trace() # Alex
         Ys, Us = Y,U
         if isinstance(Ys, np.ndarray): Ys = [Ys]
         if Us is not None and isinstance(Us, np.ndarray): Us = [Us]
@@ -101,6 +103,9 @@ class DeepAutoreg(Model):
         if U is None and self.layers[0].withControl: raise "The model needs control signals!"
         if U is not None and step is None: step=U.shape[0] - self.layers[0].U_win
         elif step is None: step=100
+        
+        # layer 0 is the top layer
+        #import pdb; pdb.set_trace() # Alex
         
         con = U
         con_win = self.layers[0].U_win - 1 if self.layers[0].withControl else 0

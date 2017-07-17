@@ -18,6 +18,8 @@ class Layer(SparseGP):
                  likelihood=None, noise_var=1., inducing_init='kmeans',
                  back_cstr=False, MLP_dims=None,name='layer'):
 
+        #import pdb; pdb.set_trace() # Alex
+        
         self.layer_upper = layer_upper
         self.nSeq = len(Xs)
 
@@ -34,7 +36,7 @@ class Layer(SparseGP):
         
         if not self.X_observed and back_cstr: self._init_encoder(MLP_dims); self.back_cstr = True
         else: self.back_cstr = False
-        self._init_XY()
+        self._init_XY() 
         
         if Z is None:
             if not back_cstr and inducing_init=='kmeans':
@@ -138,6 +140,7 @@ class Layer(SparseGP):
                 Y_offset += N
             
     def update_latent_gradients(self):
+        #import pdb; pdb.set_trace() # Alex
         X_offset = 0
         X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim
         for i_seq in range(self.nSeq):
@@ -187,6 +190,7 @@ class Layer(SparseGP):
             self._log_marginal_likelihood += delta
                 
     def parameters_changed(self):
+        #import pdb; pdb.set_trace() # Alex
         self._update_X()
         super(Layer,self).parameters_changed()
         self._update_qX_gradients()
