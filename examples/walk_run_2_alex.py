@@ -227,7 +227,11 @@ def load_data_xyz():
 
 # In[6]:
 
-def experiment(debug = False, train_model=False, model = 1, input_scaling_factor=1):
+def experiment1(debug = False, train_model=False, model = 1, input_scaling_factor=1):
+    """
+    Here the first experiment with training RGP on mocap data is performed.
+    There is a corresponding ipynb file.
+    """
     experiment_path = '/Users/grigoral/work/code/RGP/examples'
     
     #data = load_data()
@@ -244,7 +248,6 @@ def experiment(debug = False, train_model=False, model = 1, input_scaling_factor
     data_out_train = y
     
     # Ask: why first 3 dimensions are removed? # 44 and 56 -output variable is 0.
-    # Why we cut 3 dimensions
     data_out_train = y[:,3:]
     data_out_mean  = data_out_train.mean(axis=0)
     data_out_std   = data_out_train.std(axis=0)
@@ -879,8 +882,250 @@ def experiment(debug = False, train_model=False, model = 1, input_scaling_factor
 #    #                      GPy.kern.RBF(win_out+win_in,ARD=True,inv_l=True, useGPU=True)])
         
     globals().update(locals()); return # Alex
+
+def svi_test_1(debug = False, train_model=False, model = 1, second_model_svi= False, input_scaling_factor=1):
+    """
+    After new svi classes are implemented the first test is chaking that non-svi
+    inference is not broken.
     
+    Basically, two similar models are created using corresponding classes and
+    the results are tested. This case is tested when second_model_svi= False.
+    
+    We can also test 
+    """
+    experiment_path = '/Users/grigoral/work/code/RGP/examples'
+    
+    #data = load_data()
+    data = load_data_xyz()
+    
+    
+    # In[7]:
+    
+    y = data['Y']
+    u = data['Yxyz_list']
+    u_flat = np.vstack(u)
+    
+    lbls = data['lbls']
+    data_out_train = y
+    
+    # Ask: why first 3 dimensions are removed? # 44 and 56 -output variable is 0.
+    data_out_train = y[:,3:]
+    data_out_mean  = data_out_train.mean(axis=0)
+    data_out_std   = data_out_train.std(axis=0)
+    data_out_train = (y[:,3:]-data_out_mean)/data_out_std
+    #data_out_train_list = [data_out_train[np.where(lbls[:,i]==1)[0]][1:] for i in range(lbls.shape[1])]
+    data_out_train_list = [data_out_train[np.where(lbls[:,i]==1)[0]] for i in range(lbls.shape[1])]
+    
+                        
+    # Create controls
+    #data_in_train_list = [y[np.where(lbls[:,i]==1)[0]][:,2][1:] - y[np.where(lbls[:,i]==1)[0]][:,2][:-1] for i in range(lbls.shape[1])]
+    #from scipy.ndimage.filters import gaussian_filter1d
+    #data_in_train_list = [np.ones(d.shape+(1,))*d.mean() for d in data_in_train_list]
+    
+    ##data_in_train_list = [gaussian_filter1d(d,8.)[:,None] for d in data_in_train_list]
+    ##data_in_train_list = [np.vstack([d[:10],d]) for d in data_in_train_list]
+    
+    data_in_train_list = u
+    u_flat_mean = u_flat.mean(axis=0)
+    u_flat_std = u_flat.std(axis=0)
+    data_in_train = (u_flat-u_flat_mean)/u_flat_std
+        
+    #data_in_train_list = u
+    data_in_train_list = [(d-u_flat_mean)/u_flat_std for d in data_in_train_list]
+    
+    # In[8]:
+    
+    
+#    print data_in_train_list[0].shape
+#    print data_out_train_list[0].shape
+#    
+#    for i in range(len(data_in_train_list)):
+#        plt.figure()
+#        plt.plot(data_in_train_list[i], 'x-')
+#        plt.title(i)
+#        print data_in_train_list[i].shape[0]
+    
+    
+    # In[9]:
+    
+    
+    print(y.shape)
+    print(data_out_train.shape)
+    print(u_flat.shape)
+    print(data_in_train.shape)
+    
+    
+    # In[10]:
+    
+    if debug: import pdb; pdb.set_trace()
+    ytest = data['Ytest']
+    lblstest = data['lblstest']
+    u = data['Yxyz_list_test']
+    
+    #data_out_test = ytest
+    data_out_test= ytest[:,3:]
+    
+    data_out_test = (ytest[:,3:]-data_out_mean)/data_out_std
+    
+    #data_out_test_list = [data_out_test[np.where(lblstest[:,i]==1)[0]][1:] for i in range(lblstest.shape[1])]
+    data_out_test_list = [data_out_test[np.where(lblstest[:,i]==1)[0]] for i in range(lblstest.shape[1])]
+    
+    # Create controls
+    #data_in_test_list = [ytest[np.where(lblstest[:,i]==1)[0]][:,2][1:] - ytest[np.where(lblstest[:,i]==1)[0]][:,2][:-1] for i in range(lblstest.shape[1])]
+    #data_in_test_list = [np.ones(d.shape+(1,))*d.mean() for d in data_in_test_list]
+    
+    #data_in_test_list = u
+    
+    data_in_test_list = u
+    #data_in_test = (u_flat-u_flat_mean)/u_flat_std
+    data_in_test_list = [(d-u_flat_mean)/u_flat_std for d in u]
+    
+    # ## Fit a model without NN-constraint
+    
+    # In[11]:
+    
+    
+    # Down-scaling the input signals
+    #data_in_train_list = [d*0.1 for d in data_in_train_list]
+    #data_in_test_list = [d*0.1 for d in data_in_test_list]
+    #data_in_train = data_in_train*0.1
+    
+    # In[13]:
+    
+    if debug: import pdb; pdb.set_trace()
+    #=============================
+    # Initialize a model
+    #=============================
+    
+    Q = 100 # 200
+    win_in = 20 # 20
+    win_out = 20 # 20
+    use_controls = True
+    back_cstr = False
+    
+    if input_scaling_factor is None:
+        input_scaling_factor = 1
+        
+    if model == 1:
+    # create the model
+        if use_controls:
+            #m = autoreg.DeepAutoreg([0, win_out], data_out_train, U=data_in_train, U_win=win_in, X_variance=0.05,
+            #                    num_inducing=Q, back_cstr=back_cstr, MLP_dims=[300,200], nDims=[data_out_train.shape[1],1],
+            #                     kernels=[GPy.kern.RBF(win_out,ARD=True,inv_l=True, useGPU=True),
+            #                     GPy.kern.RBF(win_out+win_in,ARD=True,inv_l=True, useGPU=True)])
+            
+            # Model without lists
+    #        m = autoreg.DeepAutoreg([0, win_out, win_out], data_out_train, U=data_in_train, U_win=win_in, X_variance=0.05,
+    #                            num_inducing=Q, back_cstr=back_cstr, MLP_dims=[300,200], nDims=[data_out_train.shape[1],1,1],
+    #                             kernels=[GPy.kern.RBF(win_out,ARD=True,inv_l=True, useGPU=False),
+    #                             GPy.kern.RBF(win_out+win_out,ARD=True,inv_l=True, useGPU=False),
+    #                             GPy.kern.RBF(win_out+win_in,ARD=True,inv_l=True, useGPU=False)])
+            
+            # Model with lists
+            m = autoreg.DeepAutoreg([0, win_out, win_out], data_out_train_list, U=[d*input_scaling_factor for d in data_in_train_list], U_win=win_in, X_variance=0.05,
+                                num_inducing=Q, back_cstr=back_cstr, MLP_dims=[300,200], nDims=[data_out_train.shape[1],1,1],
+                                 kernels=[GPy.kern.RBF(win_out,ARD=True,inv_l=True, useGPU=False),
+                                 GPy.kern.RBF(win_out+win_out,ARD=True,inv_l=True, useGPU=False),
+                                 GPy.kern.RBF(win_out+win_in,ARD=True,inv_l=True, useGPU=False)])
+        
+            if not second_model_svi:
+                m_svi = autoreg.DeepAutoreg_new([0, win_out, win_out], data_out_train_list, U=[d*input_scaling_factor for d in data_in_train_list], U_win=win_in, X_variance=0.05,
+                                    num_inducing=Q, back_cstr=back_cstr, MLP_dims=[300,200], nDims=[data_out_train.shape[1],1,1],
+                                     kernels=[GPy.kern.RBF(win_out,ARD=True,inv_l=True, useGPU=False),
+                                     GPy.kern.RBF(win_out+win_out,ARD=True,inv_l=True, useGPU=False),
+                                     GPy.kern.RBF(win_out+win_in,ARD=True,inv_l=True, useGPU=False)])
+        
+                m_svi.param_array[:] = m.param_array
+                m_svi._trigger_params_changed()
+                
+            else:
+                m_svi = autoreg.DeepAutoreg_new([0, win_out, win_out], data_out_train_list, U=[d*input_scaling_factor for d in data_in_train_list], U_win=win_in, X_variance=0.05,
+                                    num_inducing=Q, back_cstr=back_cstr, MLP_dims=[300,200], nDims=[data_out_train.shape[1],1,1],
+                                     kernels=[GPy.kern.RBF(win_out,ARD=True,inv_l=True, useGPU=False),
+                                     GPy.kern.RBF(win_out+win_out,ARD=True,inv_l=True, useGPU=False),
+                                     GPy.kern.RBF(win_out+win_in,ARD=True,inv_l=True, useGPU=False)], inference_method='svi')
+            
+            
+            # used with back_cstr=True in the end of the notebook
+    #        m = autoreg.DeepAutoreg([0, win_out], data_out_train_list, U=[d*0.1 for d in data_in_train_list], U_win=win_in, X_variance=0.05,
+    #                        num_inducing=Q, back_cstr=back_cstr, MLP_dims=[500,200], nDims=[data_out_train.shape[1],1],
+    #                         kernels=[GPy.kern.MLP(win_out,bias_variance=10.),
+    #                         GPy.kern.MLP(win_out+win_in,bias_variance=10.)])
+        else:
+            m = autoreg.DeepAutoreg([0, win_out], data_in_train, U=None, U_win=win_in, X_variance=0.05,
+                                num_inducing=Q, back_cstr=back_cstr, MLP_dims=[200,100], nDims=[data_out_train.shape[1],1],
+                                 kernels=[GPy.kern.RBF(win_out,ARD=True,inv_l=True, useGPU=False),
+                                 GPy.kern.RBF(win_out,ARD=True,inv_l=True, useGPU=False)])
+        
+            if not second_model_svi:
+                m_svi = autoreg.DeepAutoreg_new([0, win_out, win_out], data_out_train_list, U=[d*input_scaling_factor for d in data_in_train_list], U_win=win_in, X_variance=0.05,
+                                    num_inducing=Q, back_cstr=back_cstr, MLP_dims=[300,200], nDims=[data_out_train.shape[1],1,1],
+                                     kernels=[GPy.kern.RBF(win_out,ARD=True,inv_l=True, useGPU=False),
+                                     GPy.kern.RBF(win_out+win_out,ARD=True,inv_l=True, useGPU=False),
+                                     GPy.kern.RBF(win_out+win_in,ARD=True,inv_l=True, useGPU=False)])
+        
+                m_svi.param_array[:] = m.param_array
+                m_svi._trigger_params_changed()
+                
+            else:
+                m_svi = autoreg.DeepAutoreg_new([0, win_out, win_out], data_out_train_list, U=[d*input_scaling_factor for d in data_in_train_list], U_win=win_in, X_variance=0.05,
+                                    num_inducing=Q, back_cstr=back_cstr, MLP_dims=[300,200], nDims=[data_out_train.shape[1],1,1],
+                                     kernels=[GPy.kern.RBF(win_out,ARD=True,inv_l=True, useGPU=False),
+                                     GPy.kern.RBF(win_out+win_out,ARD=True,inv_l=True, useGPU=False),
+                                     GPy.kern.RBF(win_out+win_in,ARD=True,inv_l=True, useGPU=False)], inference_method='svi')
+            
+    elif model == 2:
+        # Ask: no b tern in NLP regularization.
+        #=============================
+        # Model with NN-constraint
+        #=============================
+        Q = 500
+        win_in = 20
+        win_out = 20
+        
+        use_controls = True
+        back_cstr = True
+        
+        m = autoreg.DeepAutoreg([0, win_out], data_out_train_list, U=[d*input_scaling_factor for d in data_in_train_list], U_win=win_in, X_variance=0.05,
+                            num_inducing=Q, back_cstr=back_cstr, MLP_dims=[500,200], nDims=[data_out_train.shape[1],1],
+                             kernels=[GPy.kern.MLP(win_out,bias_variance=10.),
+                             GPy.kern.MLP(win_out+win_in,bias_variance=10.)])
+        #                      kernels=[GPy.kern.RBF(win_out,ARD=True,inv_l=True, useGPU=True),
+        #                      GPy.kern.RBF(win_out+win_in,ARD=True,inv_l=True, useGPU=True)])
+        if not second_model_svi:
+            m_svi = autoreg.DeepAutoreg_new([0, win_out], data_out_train_list, U=[d*input_scaling_factor for d in data_in_train_list], U_win=win_in, X_variance=0.05,
+                                num_inducing=Q, back_cstr=back_cstr, MLP_dims=[500,200], nDims=[data_out_train.shape[1],1],
+                                 kernels=[GPy.kern.MLP(win_out,bias_variance=10.),
+                                 GPy.kern.MLP(win_out+win_in,bias_variance=10.)])
+        #                      kernels=[GPy.kern.RBF(win_out,ARD=True,inv_l=True, useGPU=True),
+        #                      GPy.kern.RBF(win_out+win_in,ARD=True,inv_l=True, useGPU=True)])
+        
+            m_svi.param_array[:] = m.param_array
+            m_svi._trigger_params_changed()
+            
+        else:
+            m_svi = autoreg.DeepAutoreg_new([0, win_out], data_out_train_list, U=[d*input_scaling_factor for d in data_in_train_list], U_win=win_in, X_variance=0.05,
+                                num_inducing=Q, back_cstr=back_cstr, MLP_dims=[500,200], nDims=[data_out_train.shape[1],1],
+                                 kernels=[GPy.kern.MLP(win_out,bias_variance=10.),
+                                 GPy.kern.MLP(win_out+win_in,bias_variance=10.)], inference_method='svi')
+        
+        #                      kernels=[GPy.kern.RBF(win_out,ARD=True,inv_l=True, useGPU=True),
+        #                      GPy.kern.RBF(win_out+win_in,ARD=True,inv_l=True, useGPU=True)])
+        
+    print("Old model:")
+    print(m)
+    print("New model:")
+    print(m_svi)
+    
+    if not second_model_svi:
+        print("Maximum ll difference:  ", np.max( np.abs(m._log_marginal_likelihood - m_svi._log_marginal_likelihood ) ) )
+        print("Maximum ll_grad difference:  ", np.max( np.abs(m._log_likelihood_gradients() - m_svi._log_likelihood_gradients()) ) )
+        
+    globals().update(locals()); return # Alex
+    
+        
+        
 if __name__ == '__main__':
-    experiment(debug=False, train_model=False, model = 1, input_scaling_factor=1)
-    
+    #experiment1(debug=False, train_model=False, model = 1, input_scaling_factor=1)
+    svi_test_1(debug = False, train_model=False, model = 2, second_model_svi= True, input_scaling_factor=1)
     
