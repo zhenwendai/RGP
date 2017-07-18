@@ -28,4 +28,12 @@ class LogexpInv(Transformation):
         return 1./(np.exp(model_param)-1.)
     def __str__(self):
         return '+ve'
+    
+def comp_mapping(X, Y):
+    from GPy.core.parameterization.variational import VariationalPosterior
+    X = X.mean.values if isinstance(X, VariationalPosterior) else X
+    Y = Y.mean.values if isinstance(Y, VariationalPosterior) else Y
+    from scipy.linalg import lstsq
+    W = lstsq(X,Y)[0]
+    return W
 

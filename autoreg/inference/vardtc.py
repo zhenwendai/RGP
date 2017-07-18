@@ -85,7 +85,7 @@ class VarDTC(LatentFunctionInference):
             
         return psi0, psi2, YRY, psi1, psi1Y, Shalf, psi1S
 
-    def inference(self, kern, X, Z, likelihood, Y,Y_metadata=None, Lm=None, dL_dKmm=None):
+    def inference(self, kern, X, Z, likelihood, Y,Y_metadata=None, Lm=None, dL_dKmm=None, Kuu_sigma=None):
         """
         The first phase of inference:
         Compute: log-likelihood, dL_dKmm
@@ -108,7 +108,11 @@ class VarDTC(LatentFunctionInference):
         #======================================================================
 
         Kmm = kern.K(Z).copy()
-        diag.add(Kmm, self.const_jitter)
+        if Kuu_sigma is not None:
+            diag.add(Kmm, Kuu_sigma)
+        else:
+            diag.add(Kmm, self.const_jitter)
+                
         Lm = jitchol(Kmm)
 
         #LmInv = dtrtri(Lm)
