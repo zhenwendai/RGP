@@ -12,6 +12,10 @@ class DeepAutoreg_new(Model):
     """
     :param U_pre_step: If true, the current signal is assumed to be controlled by the control signal of the previous time step.
     :type U_pre_step: Boolean
+    
+    :param nDims: output dimensions of layers
+    :type nDims: list[num of layers]. 0-th element is output dimensionality.
+    
     """
     
     def __init__(self, wins, Y, U=None, U_win=1, nDims=None, X_variance=0.01, num_inducing=10, 
@@ -115,6 +119,7 @@ class DeepAutoreg_new(Model):
         
         # layer 0 is the top layer
         
+        layers_output = []
         con = U
         con_win = self.layers[0].U_win - 1 if self.layers[0].withControl else 0
         for i in range(self.nLayers):
@@ -122,7 +127,9 @@ class DeepAutoreg_new(Model):
             X = self.layers[i].freerun(init_Xs=None if init_Xs is None else init_Xs[-i-1], step=step,U=con,m_match=m_match, encoder=encoder)
             con = X
             con_win = self.layers[i].X_win
-        return X
+            
+            layers_output.append(X)
+        return layers_output
 
 class DeepAutoreg(Model):
     """
