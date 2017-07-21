@@ -17,6 +17,31 @@ import tables
 from matplotlib import pyplot as plt
 import os
 #import pdb;pdb.set_trace()
+
+# Define class for normalization
+class Normalize(object):
+    
+    def __init__(self, data, name, norm_name):
+        
+        self.data_mean = data.mean(axis=0)
+        self.data_std = data.std(axis=0)
+        self.normalization_computed = True
+        
+        setattr(self, name, data)                         
+        setattr(self, norm_name, (data-self.data_mean) / self.data_std )
+        
+    def normalize(self, data, name, norm_name):
+            if hasattr(self,norm_name):
+                raise ValueError("This normalization name already exist, choose another one")
+            
+            setattr(self, name, data )
+            setattr(self, norm_name, (data-self.data_mean) / self.data_std )
+            
+            
+                                     
+    def denormalize(self, data):
+                                   
+        return data*self.data_std + self.data_mean
 # In[2]:
 
 
