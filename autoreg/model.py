@@ -10,6 +10,9 @@ from .layers import Layer_new
 
 class DeepAutoreg_new(Model):
     """
+    :param wins: windows sizes of layers
+    :type wins: list[num of layers]. 0-th element correspond to output layer.
+    
     :param U_pre_step: If true, the current signal is assumed to be controlled by the control signal of the previous time step.
     :type U_pre_step: Boolean
     
@@ -20,16 +23,21 @@ class DeepAutoreg_new(Model):
     
     def __init__(self, wins, Y, U=None, U_win=1, nDims=None, X_variance=0.01, num_inducing=10, 
                  likelihood = None, name='autoreg', kernels=None, U_pre_step=True, init='Y', 
-                 inducing_init='kmeans', back_cstr=False, MLP_dims=None, inference_method=None):
+                 inducing_init='kmeans', back_cstr=False, MLP_dims=None, inference_method=None,
+                 minibatch_inference=False):
         super(DeepAutoreg_new, self).__init__(name=name)
         
         Ys, Us = Y,U
         if isinstance(Ys, np.ndarray): Ys = [Ys]
         if Us is not None and isinstance(Us, np.ndarray): Us = [Us]
         
+        # If data_streamer is planned to be used, here the first batch must be provided as input data
+        self.data_streamer = None
+        
         self.nLayers = len(wins)
         self.back_cstr = back_cstr
-        self.wsins = wins
+        self.wins = wins
+        self.U_win = U_win
         #self.input_dim = 1
         #self.output_dim = 1
         self._log_marginal_likelihood = np.nan
@@ -54,9 +62,10 @@ class DeepAutoreg_new(Model):
             self.Us = Us
             self.Ys = Ys
 
+        #import pdb; pdb.set_trace()
+        
         self.Xs = self._init_X(wins, self.Ys, self.Us, X_variance, init=init, nDims=self.nDims)
         
-        #import pdb; pdb.set_trace()
         
         self.auto_update = False if inference_method=='svi' else True
         auto_update = self.auto_update
@@ -69,13 +78,16 @@ class DeepAutoreg_new(Model):
         for i in range(self.nLayers-1,-1,-1):
             if i==self.nLayers-1: # Top layer
                 self.layers.append(Layer_new(None, self.Xs[i-1], X_win=wins[i], Us=self.Us, U_win=U_win, num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, 
-                                         noise_var=0.01, name='layer_'+str(i),  back_cstr=back_cstr, MLP_dims=MLP_dims, inducing_init=inducing_init, auto_update=auto_update, inference_method=inference_method))
+                                         noise_var=0.01, name='layer_'+str(i),  back_cstr=back_cstr, MLP_dims=MLP_dims, inducing_init=inducing_init, auto_update=auto_update, inference_method=inference_method,
+                                         minibatch_inference=minibatch_inference))
             elif i==0: # Observed layer
                 self.layers.append(Layer_new(self.layers[-1], self.Ys, X_win=wins[i], Us=self.Xs[i], U_win=wins[i+1], num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, 
-                                         likelihood=likelihood, noise_var=1., back_cstr=back_cstr, name='layer_'+str(i), inducing_init=inducing_init, auto_update=auto_update, inference_method=inference_method))
+                                         likelihood=likelihood, noise_var=1., back_cstr=back_cstr, name='layer_'+str(i), inducing_init=inducing_init, auto_update=auto_update, inference_method=inference_method,
+                                         minibatch_inference=minibatch_inference))
             else: # Observed layer Other layers
                 self.layers.append(Layer_new(self.layers[-1], self.Xs[i-1], X_win=wins[i], Us=self.Xs[i], U_win=wins[i+1], num_inducing=num_inducing[i],  kernel=kernels[i] if kernels is not None else None, 
-                                         noise_var=0.01, name='layer_'+str(i), back_cstr=back_cstr, MLP_dims=MLP_dims, inducing_init=inducing_init, auto_update=auto_update, inference_method=inference_method))
+                                         noise_var=0.01, name='layer_'+str(i), back_cstr=back_cstr, MLP_dims=MLP_dims, inducing_init=inducing_init, auto_update=auto_update, inference_method=inference_method,
+                                         minibatch_inference=minibatch_inference))
         self.link_parameters(*self.layers)
             
     def _init_X(self, wins, Ys, Us, X_variance, nDims, init='Y'):
@@ -99,6 +111,10 @@ class DeepAutoreg_new(Model):
                     mean = np.zeros((U_win+Y.shape[0], U_dim))
                     mean[:] = np.random.randn(*mean.shape)*0.01
                     var = np.zeros((U_win+Y.shape[0],U_dim))+X_variance
+                    X.append(NormalPosterior(mean,var,name='qX_'+str(i_seq)))
+                elif init=='nan':
+                    mean = np.empty((U_win+Y.shape[0], U_dim))
+                    var = np.empty((U_win+Y.shape[0],U_dim))
                     X.append(NormalPosterior(mean,var,name='qX_'+str(i_seq)))
             Xs.append(X)
         return Xs
@@ -130,7 +146,59 @@ class DeepAutoreg_new(Model):
             
             layers_output.append(X)
         return layers_output
+    
+    @Model.optimizer_array.setter
+    def optimizer_array(self, p):
+        if self.data_streamer is not None:
+            self._next_minibatch()
+        Model.optimizer_array.fset(self, p)
 
+    def _next_minibatch(self):
+        
+        idx = self.data_streamer.get_cur_index()
+        idx, Ys_n, Us_n = self.data_streamer.next_minibatch()
+        
+        #import pdb; pdb.set_trace()
+        # make U_pre_step shift ->
+        Ys = []; Us = [];
+        for i in range(len(Ys_n)):
+            Y, U = Ys_n[i], Us_n[i]
+            if self.U_pre_step:
+                U = U[:-1].copy()
+                Y = Y[self.U_win:].copy()
+            else:
+                Y = Y[self.U_win-1:].copy()
+            Us.append(NormalPosterior(U,np.ones(U.shape)*1e-10))
+            Ys.append(Y)
+        # make U_pre_step shift <-
+        
+        Xs = self._init_X(self.wins, Ys, None, None, nDims=self.nDims, init='nan')
+        
+        for i in range(self.nLayers-1,-1,-1): # does order matter?
+            layer = self.layers[self.nLayers - i - 1]
+        
+            if i==self.nLayers-1: # Top layer
+                layer_Us = Us if layer.withControl else None
+                layer_Xs = Xs[i-1] 
+            elif i==0: # Observed layer
+                layer_Us = Xs[i]
+                layer_Xs = Ys
+            else: # Observed layer Other layers
+                layer_Us = Xs[i]
+                layer_Xs = Xs[i-1]
+            
+            layer.set_inputs_and_outputs(len(layer_Xs), Xs=layer_Xs, Us=layer_Us)
+            
+        
+    def set_DataStreamer(self, data_streamer):
+        from math import ceil
+        self.data_streamer = data_streamer
+        nData = data_streamer.total_size
+        
+        qU_ratio = float(data_streamer.minibatch_size) / nData
+        for l in self.layers:
+            l.qU_ratio = qU_ratio
+                    
 class DeepAutoreg(Model):
     """
     :param U_pre_step: If true, the current signal is assumed to be controlled by the control signal of the previous time step.
@@ -191,6 +259,8 @@ class DeepAutoreg(Model):
         self.link_parameters(*self.layers)
             
     def _init_X(self, wins, Ys, Us, X_variance, nDims, init='Y'):
+        import pdb; pdb.set_trace()
+        
         Xs = []
         for i_layer in range(1,self.nLayers):
             X = []
