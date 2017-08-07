@@ -452,7 +452,11 @@ class Layer_new(SparseGP_MPI):
                 X_flat.mean[X_win+n] = X_out[0]
     
     def _encoder_update_gradient(self):
-        self.encoder.prepare_grad()        
+        """
+        Updates the gradient of L wrt q_X_init (and q_X), taking into account that each value of q_X
+        was used to generate future values.
+        """
+        self.encoder.prepare_grad() # zero all theano gradients       
         X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim
         Q = X_win*X_dim+U_win*U_dim if self.withControl else X_win*X_dim
         
@@ -473,7 +477,7 @@ class Layer_new(SparseGP_MPI):
                 if self.withControl: 
                     X_in[X_win*X_dim:] = U_flat.mean[U_offset+n:U_offset+n+U_win].flat
                 dL[:] = X_flat.mean.gradient[X_win+n].flat
-                dX = self.encoder.update_gradient(X_in[None,:], dL[None,:])
+                dX = self.encoder.update_gradient(X_in[None,:], dL[None,:]) # Set gradient from theano to Python parameter
                 X_flat.mean.gradient[n:n+X_win] += dX[0,:X_win*X_dim].reshape(-1,X_dim)
                 if self.withControl:
                     U_flat.mean.gradient[U_offset+n:U_offset+n+U_win] += dX[0, X_win*X_dim:].reshape(-1,U_dim)

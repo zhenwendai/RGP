@@ -42,6 +42,7 @@ class Layer(Parameterized):
         self.layer_backward = layer_backward # the link to its upper layer
 
     def _prepare_grad(self):
+        # Sets to zeros theano gradients
         self.W_grad_theano.set_value(np.zeros_like(self.W.gradient, dtype=theano.config.floatX))
         self.b_grad_theano.set_value(np.zeros_like(self.b.gradient, dtype=theano.config.floatX))
         if self.layer_forward is not None:
@@ -55,6 +56,7 @@ class Layer(Parameterized):
 
         
     def _update_gradient(self):
+        # Copies gradient from theano to python parameter
         self.W.gradient[:] = self.W_grad_theano.get_value()
         self.b.gradient[:] = self.b_grad_theano.get_value()
         if self.layer_forward is not None:
@@ -135,8 +137,8 @@ class MLP(Parameterized):
             self.theano_init = True
         X = X if self.X_center is None else X-self.X_center
         if len(X.shape)==1: X = X[None,:]; dL = dL[None,:]
-        X_grad = self.layers[0]._comp_grad(X, dL)
-        self.layers[0]._update_gradient()
+        X_grad = self.layers[0]._comp_grad(X, dL) 
+        self.layers[0]._update_gradient() # Copy W, b gradients from theano to python parameters
         return X_grad
     
     def prepare_grad(self):
