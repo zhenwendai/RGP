@@ -82,6 +82,8 @@ class DeepAutoreg_new(Model):
             self.mb_inf_init_xs_vars = mb_inf_init_xs_vars
             self.minibatch_inference = minibatch_inference
             self.mb_inf_tot_data_size = mb_inf_tot_data_size
+        else:
+            self.minibatch_inference = False
             
         # Initialize Layers. The top layer goes first in the list
         self.layers = []
@@ -156,7 +158,7 @@ class DeepAutoreg_new(Model):
         #import pdb; pdb.set_trace()
         
         # generate initial values for layer back_cstr recurssion ->
-        if (self.minibatch_inference and  self.mb_inf_init_xs_means=='mlp'):
+        if (self.minibatch_inference and self.mb_inf_init_xs_means=='mlp'):
             
             previous_layer_data = [ Y[ 0:self.layers[-2].X_win ] for Y in self.Ys ]# observable layer
             
@@ -183,7 +185,7 @@ class DeepAutoreg_new(Model):
     def freerun(self, init_Xs=None, step=None, U=None, m_match=True, encoder=False):
         assert self.U_pre_step, "The other case is not implemented yet!"
         if U is None and self.layers[0].withControl: raise "The model needs control signals!"
-        if U is not None and step is None: step=U.shape[0] - self.layers[0].U_wins
+        if U is not None and step is None: step=U.shape[0] - self.layers[0].U_win
         elif step is None: step=100
         
         # layer 0 is the top layer
@@ -351,7 +353,7 @@ class DeepAutoreg(Model):
         self.link_parameters(*self.layers)
             
     def _init_X(self, wins, Ys, Us, X_variance, nDims, init='Y'):
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         
         Xs = []
         for i_layer in range(1,self.nLayers):
