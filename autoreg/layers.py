@@ -179,8 +179,29 @@ class Layer_new(SparseGP_MPI):
     
     def __init__(self, layer_upper, Xs, X_win=0, Us=None, U_win=1, Z=None, num_inducing=10,  kernel=None, inference_method=None, 
                  likelihood=None, noise_var=1., inducing_init='kmeans',
-                 back_cstr=False, MLP_dims=None, auto_update=True, minibatch_inference = False, name='layer'):
+                 back_cstr=False, MLP_dims=None, auto_update=True, minibatch_inference = False, 
+                 mb_inf_tot_data_size=None, mb_inf_init_xs_means='all', mb_inf_init_xs_vars='all', 
+                 mb_inf_sample_idxes=None,  name='layer'):
+        """
+        minibatch_inference: bool
+            Minibatch inference is used
         
+        mb_inf_tot_data_size: int
+            Total dataset size when minibatch inference is used. It is needed to
+            initialize 'self.init_Xs' when  'mb_inf_init_xs_means="all"' e.g.
+            one initial value for each datapoint. If 'mb_inf_init_xs_means != "all"'
+            it can be zero.
+        
+        mb_inf_init_xs_means: string one of ['one', 'all', 'mlp']
+            How to handle initial values for for Xs. 'single' - only one parameter. 
+            Does not make much sence. 'all' one parameter ofr each data point,
+            'mlp' - encoded by mlp
+            
+        mb_inf_init_xs_vars: string one of ['all', 'one']
+            'all' - single variance for each data point (not separated between init and main)
+            'one' - one balue for all data points
+        
+        """
         self.layer_upper = layer_upper
         self.nSeq = len(Xs)
         
@@ -200,10 +221,22 @@ class Layer_new(SparseGP_MPI):
         assert ((minibatch_inference == back_cstr) if (minibatch_inference == True) else True), "Minibatch inference only works with back constrains"
         self.minibatch_inference = minibatch_inference
         
+        #import pdb; pdb.set_trace()
+        if minibatch_inference:
+            assert ((mb_inf_init_xs_means != 'all') and (mb_inf_init_xs_vars != 'all')) or (mb_inf_tot_data_size is not None), "'mb_inf_tot_data_size' must be provided."
+            assert ((mb_inf_init_xs_means != 'all') and (mb_inf_init_xs_vars != 'all')) or (mb_inf_sample_idxes is not None), "Data indices must be provided."
+            #assert (mb_inf_init_xs_means != 'all') or (mb_inf_tot_data_size == self.nSeq), "Wrong total data size"
+            
+            self.mb_inf_tot_data_size = mb_inf_tot_data_size
+            self.mb_inf_sample_idxes = mb_inf_sample_idxes
+            
+            self.mb_inf_init_xs_means = mb_inf_init_xs_means
+            self.mb_inf_init_xs_vars = mb_inf_init_xs_vars
+        
         if not self.X_observed and back_cstr: self._init_encoder(MLP_dims); self.back_cstr = True
         else: self.back_cstr = False
         
-        #import pdb; pdb.set_trace()
+        
         
         self._init_XY() 
         
@@ -225,18 +258,48 @@ class Layer_new(SparseGP_MPI):
         self.normalPrior, self.normalEntropy = NormalPrior(), NormalEntropy()
         super(Layer_new, self).__init__(self.X, self.Y, Z, kernel, likelihood, inference_method=inference_method, auto_update=auto_update, name=name)
         #super(Layer, self).__init__(X, Y, Z, kernel, likelihood, inference_method=inference_method, mpi_comm=mpi_comm, mpi_root=mpi_root, auto_update=auto_update, name=name)
+        
+        #import pdb; pdb.set_trace()
         if not self.X_observed: 
             if back_cstr:
-                assert self.X_win>0
-                self.link_parameters(*(self.init_Xs + self.Xs_var+[self.encoder]))
+                if self.minibatch_inference:
+                    self.link_parameters(*([self.encoder,]) )
+                    
+                    # means ->
+                    if self.mb_inf_init_xs_means == 'one':
+                        self.link_parameters(*(self.init_Xs))
+                    
+                    elif self.mb_inf_init_xs_means == 'all':
+                        self.link_parameters(*(self.init_Xs_all))
+                        
+                    elif self.mb_inf_init_xs_means == 'mlp':     
+                        self.link_parameters(*(self.init_encoder ))
+                
+                    # vars ->
+                    if self.mb_inf_init_xs_vars == 'one':
+                        self.link_parameters(*(self.Xs_var))
+                        
+                    elif self.mb_inf_init_xs_means == 'all':
+                        self.link_parameters(*(self.Xs_var_all))
+                
+                
+                else:
+                    self.link_parameters(*(self.init_Xs + self.Xs_var+[self.encoder]))
+                    
             else:
                 self.link_parameters(*self.Xs_flat)
                 
-    def set_inputs_and_outputs(self, batch_size, Xs=None, Us=None):
+    def set_inputs_and_outputs(self, batch_size, Xs=None, Us=None, samples_idxes=None):
         """
         This function is called from the model during minibatch inference.
         It updates the observed inputs and outputs for layers which have those. For
         hidden layers it only sets self.nSeq.
+        
+        Inputs:
+        -----------------------------
+        
+        samples_idxes: sequence
+            absolute indices of this minibatch samples, indices start from 0
         """
         
         #import pdb; pdb.set_trace()
@@ -248,13 +311,37 @@ class Layer_new(SparseGP_MPI):
         if self.withControl == (Us is not None):
             self.Us_flat = Us
         else:
-            raise AssertionError("Us type must be preserved")
-            
+            pass
+            #raise AssertionError("Us type must be preserved")
+        
+        self.Xs_flat = Xs # Need to change the sample sizes for each layer
         if self.X_observed:
             assert not isinstance(Xs[0], VariationalPosterior), "self.X_observed status must not change"
         
-        self.Xs_flat = Xs
-        self._init_XY()
+            #self.Xs_flat = Xs
+        else:
+            # init_xs means ->
+            if self.mb_inf_init_xs_means == 'one':
+                pass
+            
+            elif self.mb_inf_init_xs_means == 'all':
+                self.init_Xs = [ self.init_Xs_all[i] for i in samples_idxes ]
+                self.mb_inf_sample_idxes = samples_idxes
+                
+            elif self.mb_inf_init_xs_means == 'mlp':
+                # init encoder has been update externaly already
+                pass
+        
+            # init_xs vars ->
+            if self.mb_inf_init_xs_vars == 'one':
+                pass
+                
+            elif self.mb_inf_init_xs_vars == 'all':
+                self.Xs_var = [ self.Xs_var_all[i] for i in samples_idxes ]
+                self.mb_inf_sample_idxes = samples_idxes
+            
+            
+        self._init_XY() # without it gradient chack fails
         
     def _init_encoder(self, MLP_dims):
         from .mlp import MLP
@@ -262,14 +349,39 @@ class Layer_new(SparseGP_MPI):
         
         X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim
         assert X_win>0, "Neural Network constraints only applies autoregressive structure!"
-        Q = X_win*X_dim+U_win*U_dim if self.withControl else X_win*X_dims
+        Q = X_win*X_dim+U_win*U_dim if self.withControl else X_win*X_dim
+        
+        #import pdb; pdb.set_trace()
         
         if self.minibatch_inference:
-            # only one init_Xs and one variance parameter
-            self.init_Xs = [ NormalPosterior(self.Xs_flat[0].mean.values[:X_win],self.Xs_flat[0].variance.values[:X_win], name='init_Xs_only'), ]
-            self.init_Xs[0].mean[:] = np.random.randn(*self.init_Xs[0].shape)*1e-2
             
-            self.Xs_var = [ Param('X_var_only',self.Xs_flat[0].variance.values.mean(), Logexp()), ]
+            # Means ->
+            if self.mb_inf_init_xs_means == 'one':
+                self.init_Xs = [NormalPosterior(self.Xs_flat[0].mean.values[:X_win].copy(),self.Xs_flat[0].variance.values[:X_win].copy(), name='init_Xs_only'), ]
+                
+            elif self.mb_inf_init_xs_means == 'all':
+                self.init_Xs_all = [NormalPosterior(self.Xs_flat[0].mean.values[:X_win].copy(),self.Xs_flat[0].variance.values[:X_win].copy(), name='init_Xs_all_'+str(i)) for i in range(self.mb_inf_tot_data_size)]
+                
+                self.init_Xs = [ self.init_Xs_all[i] for i in self.mb_inf_sample_idxes]
+                
+                # Why do we need second initialization here?
+                # for init_X in self.init_Xs: init_X.mean[:] = np.random.randn(*init_X.shape)*1e-2
+                
+            elif self.mb_inf_init_xs_means == 'mlp':     
+                self.init_Xs = [NormalPosterior(self.Xs_flat[i].mean.values[:X_win].copy(),self.Xs_flat[i].variance.values[:X_win].copy(), name='init_Xs_'+str(i)) for i in range(self.nSeq)]
+                
+                # Why do we need second initialization here?
+                # for init_X in self.init_Xs: init_X.mean[:] = np.random.randn(*init_X.shape)*1e-2
+            
+            # Variances ->
+            if self.mb_inf_init_xs_vars == 'one':
+                self.Xs_var = [Param('X_var_only_'+str(0),self.Xs_flat[0].variance.values[0].copy(), Logexp()), ] # only one variance per episode
+                
+            elif self.mb_inf_init_xs_vars == 'all':
+                self.Xs_var_all = [Param('X_var_all_'+str(i),self.Xs_flat[0].variance.values[0].copy(), Logexp()) for i in range(self.mb_inf_tot_data_size)] # only one variance per episode
+                
+                self.Xs_var = [self.Xs_var_all[i] for i in self.mb_inf_sample_idxes ] # only one variance per episode
+
         else:
             self.init_Xs = [NormalPosterior(self.Xs_flat[i].mean.values[:X_win],self.Xs_flat[i].variance.values[:X_win], name='init_Xs_'+str(i)) for i in range(self.nSeq)]
             for init_X in self.init_Xs: init_X.mean[:] = np.random.randn(*init_X.shape)*1e-2
@@ -277,7 +389,39 @@ class Layer_new(SparseGP_MPI):
             self.Xs_var = [Param('X_var_'+str(i),self.Xs_flat[i].variance.values[X_win:].copy(), Logexp()) for i in range(self.nSeq)]
 
         self.encoder = MLP([Q, Q*2, Q+X_dim/2, X_dim] if MLP_dims is None else [Q]+deepcopy(MLP_dims)+[X_dim])
+    
+    def _init_initialization_encoder(self, lower_layer_win, lower_layer_dim, mlp_dims=None):
+        """
+        This function is called from the model to initalize layer encoder which
+        computes initial values for Xs.
+        """
+        from .mlp import MLP
+        from copy import deepcopy
+    
+        Q = lower_layer_win * lower_layer_dim
+        D = self.X_dim * self.X_win
         
+        self.init_encoder = MLP([Q, Q*2, Q+D/2, D] if mlp_dims is None else [Q,]+deepcopy(mlp_dims)+[D,])
+        self.link_parameters( *([self.init_encoder,]) )
+    
+    def _update_initial_encoder(self, lower_layer_init_data):
+        """
+        This function is called from the model to update the values of self.init_Xs
+        """
+        #import pdb; pdb.set_trace()
+        
+        assert (self.minibatch_inference and self.mb_inf_init_xs_means == 'mlp'), "Not right inference is used"
+        
+        assert self.nSeq == len(lower_layer_init_data), "Sequence number must coincide"
+        
+        for i,sample in enumerate(lower_layer_init_data): #iterate over sequences
+            if isinstance(sample,NormalPosterior): # lower layer is not observable
+                X_out = self.init_encoder.predict(sample.mean.flatten())
+            else:
+                X_out = self.init_encoder.predict(sample.flatten())
+            self.init_Xs[i].mean[:] = X_out[0].reshape( self.init_Xs[i].mean.shape )
+            #var - nothing
+            
     def _init_XY(self):
         """
         Initialize variables self.X and self.Y from self.Xs_flat
@@ -286,7 +430,7 @@ class Layer_new(SparseGP_MPI):
         self._update_conv()
         if self.X_win>0: X_mean_conv, X_var_conv = np.vstack(self.X_mean_conv), np.vstack(self.X_var_conv)
         if self.withControl: U_mean_conv, U_var_conv = np.vstack(self.U_mean_conv), np.vstack(self.U_var_conv)
-        
+         
         if not self.withControl:
             self.X = NormalPosterior(X_mean_conv, X_var_conv)
         elif self.X_win==0:
@@ -389,6 +533,8 @@ class Layer_new(SparseGP_MPI):
         """
         Compute parts of of gradients "self.Xs_flat" from gradients of self.Y
         """
+        #import pdb; pdb.set_trace()
+        
         X_win = self.X_win
         if self.withControl and self.layer_upper is None:
             for U in self.Us_flat:
@@ -409,31 +555,49 @@ class Layer_new(SparseGP_MPI):
                 else:
                     X.variance.gradient[X_win:] += self.grad_dict['dL_dYvar'][Y_offset:Y_offset+N]
                 
-                if X_win>0:
+                if X_win>0: # What about encoder? are these affect the encoder?
                     delta += -self.normalPrior.comp_value(X[:X_win])
                     self.normalPrior.update_gradients(X[:X_win])
+                    
                 delta += -self.normalEntropy.comp_value(X[X_win:])
                 self.normalEntropy.update_gradients(X[X_win:])
                 Y_offset += N
             self._log_marginal_likelihood += delta
     
     def update_layer(self):
-        self._update_X()
-        super(Layer_new,self).update_layer()
-        self._update_qX_gradients()
-        self._prepare_gradients()
+        self._update_X() # Update variables self.X and self.Y from self.Xs_flat
+        super(Layer_new,self).update_layer() 
+        self._update_qX_gradients() # computes gradients wrt self.X
+        self._prepare_gradients() # computes parts of gradients "self.Xs_flat" from gradients of self.Y
             
     def _encoder_freerun(self):
+        """
+        This function updates X_flat after parameters have changed
+        """
+        
         X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim        
         Q = X_win*X_dim+U_win*U_dim if self.withControl else X_win*X_dim
         
+        #import pdb; pdb.set_trace()
+        
         X_in = np.zeros((Q,))
         for i_seq in range(self.nSeq):
-            
             if not self.minibatch_inference:
                 X_flat, init_X, X_var = self.Xs_flat[i_seq], self.init_Xs[i_seq], self.Xs_var[i_seq]
             else:
-                X_flat, init_X, X_var = self.Xs_flat[i_seq], self.init_Xs[0], self.Xs_var[0]
+                # init means ->
+                if self.mb_inf_init_xs_means == 'one':
+                    X_flat, init_X = self.Xs_flat[i_seq], self.init_Xs[0]
+                    
+                elif self.mb_inf_init_xs_means == 'all':
+                    X_flat, init_X = self.Xs_flat[i_seq], self.init_Xs[i_seq]
+                    
+                # init vas
+                if self.mb_inf_init_xs_vars == 'one':
+                    X_var = self.Xs_var[0]
+                    
+                elif self.mb_inf_init_xs_vars == 'all':
+                    X_var = self.Xs_var[i_seq]
             
             #import pdb; pdb.set_trace()
             
@@ -462,11 +626,39 @@ class Layer_new(SparseGP_MPI):
         
         X_in = np.zeros((Q,))
         dL =np.zeros((X_dim,))
+                
+        #import pdb; pdb.set_trace()
+        # Nullify gradients for samples which are not in this minibatch ->
+        # These samples are left from previous minibatch
+        if self.minibatch_inference and ( self.mb_inf_init_xs_means == 'all' or self.mb_inf_init_xs_vars == 'all'):
+            for i in range(self.mb_inf_tot_data_size):
+                if not i in self.mb_inf_sample_idxes:
+                    if self.mb_inf_init_xs_means == 'all':
+                        self.init_Xs_all[i].mean.gradient[:] = 0
+                        self.init_Xs_all[i].variance.gradient[:] = 0
+            
+                    if self.mb_inf_init_xs_vars == 'all':
+                        self.Xs_var_all[i].gradient[:] = 0
+                        self.Xs_var_all[i].gradient[:] = 0
+         # Nullify gradients for samples which are not in this minibatch <-  
+            
         for i_seq in range(self.nSeq):
             if not self.minibatch_inference:
                 X_flat, init_X, X_var = self.Xs_flat[i_seq], self.init_Xs[i_seq], self.Xs_var[i_seq]
             else:
-                X_flat, init_X, X_var = self.Xs_flat[i_seq], self.init_Xs[0], self.Xs_var[0]
+                # init means ->
+                if self.mb_inf_init_xs_means == 'one':
+                    X_flat, init_X = self.Xs_flat[i_seq], self.init_Xs[0]
+                    
+                elif self.mb_inf_init_xs_means == 'all':
+                    X_flat, init_X = self.Xs_flat[i_seq], self.init_Xs[i_seq]
+                    
+                # init vars
+                if self.mb_inf_init_xs_vars == 'one':
+                    X_var = self.Xs_var[0]
+                    
+                elif self.mb_inf_init_xs_vars == 'all':
+                    X_var = self.Xs_var[i_seq]
                 
             if self.withControl: U_flat = self.Us_flat[i_seq]
             N = X_flat.shape[0] - X_win
@@ -491,17 +683,75 @@ class Layer_new(SparseGP_MPI):
             
                 X_var.gradient[:] = X_flat.variance.gradient[X_win:]
             else:
-                if i_seq == 0: 
+                
+                # Means ->
+                if self.mb_inf_init_xs_means == 'one':
+                    if i_seq == 0: 
+                        init_X.mean.gradient[:] = X_flat.mean.gradient[:X_win]
+                        init_X.variance.gradient[:] = X_flat.variance.gradient[:X_win]
+                        
+                    else:
+                        init_X.mean.gradient[:] += X_flat.mean.gradient[:X_win]
+                        init_X.variance.gradient[:] += X_flat.variance.gradient[:X_win]
+                    
+                elif self.mb_inf_init_xs_means == 'all':
                     init_X.mean.gradient[:] = X_flat.mean.gradient[:X_win]
                     init_X.variance.gradient[:] = X_flat.variance.gradient[:X_win]
                     
-                    X_var.gradient = np.sum( X_flat.variance.gradient[X_win:] )
-                else:
-                    init_X.mean.gradient[:] += X_flat.mean.gradient[:X_win]
-                    init_X.variance.gradient[:] += X_flat.variance.gradient[:X_win]
-                    
-                    X_var.gradient += np.sum( X_flat.variance.gradient[X_win:] )
+                elif self.mb_inf_init_xs_means == 'mlp':     
+                    raise NotImplemented("sdfbdsf")
                 
+                # Variances ->
+                if self.mb_inf_init_xs_vars == 'one':
+                    if i_seq == 0: 
+                        X_var.gradient = np.sum( X_flat.variance.gradient[X_win:], axis=0 )
+                    else:
+                        X_var.gradient += np.sum( X_flat.variance.gradient[X_win:], axis=0 )
+                    
+                elif self.mb_inf_init_xs_vars == 'all':
+                    #if i_seq == 0: 
+                    X_var.gradient = np.sum( X_flat.variance.gradient[X_win:], axis=0 )
+                    #else:
+                    #    X_var.gradient += np.sum( X_flat.variance.gradient[X_win:], axis=0 )
+                    
+            # update gradients of initial parameters MLPs ->
+            
+            # update gradients of initial parameters MLPs <-
+    
+    def _encoder_update_initial_gradient(low_input, top_grad=None):
+        """
+        This function computes the gradient wrt parameters of MLPs which
+        encode initial values of Xs.
+        
+        Input:
+        --------------------
+        top_grad: array
+            Gradient of ELBO wrt inputs of the previous layer (these are outputs of this layer).
+        
+        low_input: array
+            Initial values of the lower layer or observations if lower layer is an observed one.
+        """
+        import pdb; pdb.set_trace()
+        
+        self.init_encoder.prepare_grad() # zero all theano gradients
+        
+        init_In = np.zeros( self.init_Xs[0].mean[:self.X_win].shape )
+        init_In_grad = np.zeros( self.init_Xs[0].gradient[:self.X_win].shape )
+        
+        dX_2 = []
+        for i_seq in range(self.nSeq):
+            
+            init_In[:] = self.init_Xs[i_seq].mean[:self.X_win]
+            init_In_grad[:] = self.init_Xs[i_seq].gradient[:self.X_win]
+            
+            dX_1 = self.init_ecoder.update_gradient(low_input[i_seq], init_In_grad)
+            
+            if top_grad is not None:
+                dX_2.append( self.init_ecoder.update_gradient(init_In, top_grad[i_seq] ) )
+            
+        return dX_2
+            
+      
     def freerun(self, init_Xs=None, step=None, U=None, m_match=True, encoder=False):
         X_win, X_dim, U_win, U_dim = self.X_win, self.X_dim, self.U_win, self.U_dim
         Q = X_win*X_dim+U_win*U_dim if self.withControl else X_win*X_dim
