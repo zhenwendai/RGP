@@ -225,6 +225,13 @@ class Layer_new(SparseGP_MPI):
         if minibatch_inference:
             assert ((mb_inf_init_xs_means != 'all') and (mb_inf_init_xs_vars != 'all')) or (mb_inf_tot_data_size is not None), "'mb_inf_tot_data_size' must be provided."
             assert ((mb_inf_init_xs_means != 'all') and (mb_inf_init_xs_vars != 'all')) or (mb_inf_sample_idxes is not None), "Data indices must be provided."
+            
+            # set qU_ratio ->
+            assert  mb_inf_sample_idxes is not None, "Need to provide ititial indixes"
+            qU_ratio = float( len(mb_inf_sample_idxes) ) / mb_inf_tot_data_size
+            self.qU_ratio = qU_ratio
+            # set qU_ratio <-
+        
             #assert (mb_inf_init_xs_means != 'all') or (mb_inf_tot_data_size == self.nSeq), "Wrong total data size"
             
             self.mb_inf_tot_data_size = mb_inf_tot_data_size
@@ -232,7 +239,9 @@ class Layer_new(SparseGP_MPI):
             
             self.mb_inf_init_xs_means = mb_inf_init_xs_means
             self.mb_inf_init_xs_vars = mb_inf_init_xs_vars
-        
+        else:
+            self.qU_ratio = 1
+            
         if not self.X_observed and back_cstr: self._init_encoder(MLP_dims); self.back_cstr = True
         else: self.back_cstr = False
         
@@ -270,7 +279,7 @@ class Layer_new(SparseGP_MPI):
                         self.link_parameters(*(self.init_Xs))
                     
                     elif self.mb_inf_init_xs_means == 'all':
-                        self.link_parameters(*(self.init_Xs_all))
+                        self.link_parameters(*(self.init_Xs))
                         
                     elif self.mb_inf_init_xs_means == 'mlp':     
                         self.link_parameters(*(self.init_encoder ))
@@ -280,7 +289,7 @@ class Layer_new(SparseGP_MPI):
                         self.link_parameters(*(self.Xs_var))
                         
                     elif self.mb_inf_init_xs_means == 'all':
-                        self.link_parameters(*(self.Xs_var_all))
+                        self.link_parameters(*(self.Xs_var))
                 
                 
                 else:
@@ -305,14 +314,20 @@ class Layer_new(SparseGP_MPI):
         #import pdb; pdb.set_trace()
         
         assert self.minibatch_inference, "This is developed and tested only for minibatch inference"
+        assert batch_size == len(samples_idxes), "Length must be correct"
         
-        self.nSeq = batch_size
+        self.nSeq = batch_size # new batch size
 
-        if self.withControl == (Us is not None):
+        if self.withControl == (Us is not None): 
             self.Us_flat = Us
         else:
             pass
             #raise AssertionError("Us type must be preserved")
+        
+        # set qU_ratio ->
+        qU_ratio = float( self.nSeq ) / self.mb_inf_tot_data_size
+        self.qU_ratio = qU_ratio
+        # set qU_ratio <-
         
         self.Xs_flat = Xs # Need to change the sample sizes for each layer
         if self.X_observed:
@@ -325,9 +340,30 @@ class Layer_new(SparseGP_MPI):
                 pass
             
             elif self.mb_inf_init_xs_means == 'all':
-                self.init_Xs = [ self.init_Xs_all[i] for i in samples_idxes ]
-                self.mb_inf_sample_idxes = samples_idxes
-                
+                # save current parameters
+                for loc_ind, glob_ind in enumerate(self.mb_inf_sample_idxes):
+                    self.init_Xs_all[glob_ind].mean = self.init_Xs[loc_ind].mean
+                    self.init_Xs_all[glob_ind].variance = self.init_Xs[loc_ind].variance
+                    
+                if (self.nSeq == len(self.mb_inf_sample_idxes)): # minibatch size is the same
+                    for loc_ind, glob_ind in enumerate(samples_idxes):
+                        self.init_Xs[loc_ind].mean[:] = self.init_Xs_all[glob_ind].mean
+                        self.init_Xs[loc_ind].variance[:] = self.init_Xs_all[glob_ind].variance
+                else: # minibatch size is different
+                    
+                    for init_Xs in self.init_Xs:
+                        self.unlink_parameter(init_Xs)
+                    
+                    self.init_Xs = [NormalPosterior(self.Xs_flat[i].mean.values[:self.X_win].copy(),self.Xs_flat[i].variance.values[:self.X_win].copy(), name='init_Xs_' + str(i)) for i in range(self.nSeq) ] # only initialize
+                    for loc_ind, glob_ind in enumerate(samples_idxes):
+                        self.init_Xs[loc_ind].mean[:] = self.init_Xs_all[glob_ind].mean
+                        self.init_Xs[loc_ind].variance[:] = self.init_Xs_all[glob_ind].variance
+                    
+                    self.link_parameters(*self.init_Xs)
+                    
+                if not (self.mb_inf_init_xs_vars == 'all'):
+                    self.mb_inf_sample_idxes = samples_idxes
+                    
             elif self.mb_inf_init_xs_means == 'mlp':
                 # init encoder has been update externaly already
                 pass
@@ -337,7 +373,23 @@ class Layer_new(SparseGP_MPI):
                 pass
                 
             elif self.mb_inf_init_xs_vars == 'all':
-                self.Xs_var = [ self.Xs_var_all[i] for i in samples_idxes ]
+                # save current parameters
+                for loc_ind, glob_ind in enumerate(self.mb_inf_sample_idxes):
+                    self.Xs_var_all[glob_ind].values[:] = self.Xs_var[loc_ind].values
+                
+                if (self.nSeq == len(self.mb_inf_sample_idxes)): # minibatch size is the same
+                    for loc_ind, glob_ind in enumerate(samples_idxes):
+                        self.Xs_var[loc_ind].values[:] = self.Xs_var_all[glob_ind].values
+                else: # minibatch size is different
+                    for Xs_var in self.Xs_var:
+                        self.unlink_parameter(Xs_var)
+                    
+                    self.Xs_var = [Param('X_var_'+str(i),self.Xs_flat[i].variance.values[0].copy(), Logexp()) for i in range(self.nSeq) ] # only initialize
+                    for loc_ind, glob_ind in enumerate(samples_idxes):
+                        self.Xs_var[loc_ind].values[:] = self.Xs_var_all[glob_ind].values
+                        
+                    self.link_parameters(*(self.Xs_var))
+                
                 self.mb_inf_sample_idxes = samples_idxes
             
             
@@ -360,9 +412,8 @@ class Layer_new(SparseGP_MPI):
                 self.init_Xs = [NormalPosterior(self.Xs_flat[0].mean.values[:X_win].copy(),self.Xs_flat[0].variance.values[:X_win].copy(), name='init_Xs_only'), ]
                 
             elif self.mb_inf_init_xs_means == 'all':
-                self.init_Xs_all = [NormalPosterior(self.Xs_flat[0].mean.values[:X_win].copy(),self.Xs_flat[0].variance.values[:X_win].copy(), name='init_Xs_all_'+str(i)) for i in range(self.mb_inf_tot_data_size)]
-                
-                self.init_Xs = [ self.init_Xs_all[i] for i in self.mb_inf_sample_idxes]
+                self.init_Xs_all = [NormalPosterior(self.Xs_flat[0].mean.values[:self.X_win].copy(), self.Xs_flat[0].variance.values[:self.X_win].copy(), name='init_Xs_all_'+str(i)) for i in range(self.mb_inf_tot_data_size)]
+                self.init_Xs = [NormalPosterior(self.Xs_flat[i].mean.values[:X_win].copy(),self.Xs_flat[i].variance.values[:X_win].copy(), name='init_Xs_'+str(i)) for i in range(self.nSeq) ]
                 
                 # Why do we need second initialization here?
                 # for init_X in self.init_Xs: init_X.mean[:] = np.random.randn(*init_X.shape)*1e-2
@@ -378,9 +429,8 @@ class Layer_new(SparseGP_MPI):
                 self.Xs_var = [Param('X_var_only_'+str(0),self.Xs_flat[0].variance.values[0].copy(), Logexp()), ] # only one variance per episode
                 
             elif self.mb_inf_init_xs_vars == 'all':
-                self.Xs_var_all = [Param('X_var_all_'+str(i),self.Xs_flat[0].variance.values[0].copy(), Logexp()) for i in range(self.mb_inf_tot_data_size)] # only one variance per episode
-                
-                self.Xs_var = [self.Xs_var_all[i] for i in self.mb_inf_sample_idxes ] # only one variance per episode
+                self.Xs_var_all = [Param('X_var_all_'+str(i), self.Xs_flat[0].variance.values[0].copy(), Logexp()) for i in range(self.mb_inf_tot_data_size)] # only one variance per episode
+                self.Xs_var = [Param('X_var_'+str(i),self.Xs_flat[i].variance.values[0].copy(), Logexp()) for i in range(self.nSeq) ]
 
         else:
             self.init_Xs = [NormalPosterior(self.Xs_flat[i].mean.values[:X_win],self.Xs_flat[i].variance.values[:X_win], name='init_Xs_'+str(i)) for i in range(self.nSeq)]
@@ -628,19 +678,6 @@ class Layer_new(SparseGP_MPI):
         dL =np.zeros((X_dim,))
                 
         #import pdb; pdb.set_trace()
-        # Nullify gradients for samples which are not in this minibatch ->
-        # These samples are left from previous minibatch
-        if self.minibatch_inference and ( self.mb_inf_init_xs_means == 'all' or self.mb_inf_init_xs_vars == 'all'):
-            for i in range(self.mb_inf_tot_data_size):
-                if not i in self.mb_inf_sample_idxes:
-                    if self.mb_inf_init_xs_means == 'all':
-                        self.init_Xs_all[i].mean.gradient[:] = 0
-                        self.init_Xs_all[i].variance.gradient[:] = 0
-            
-                    if self.mb_inf_init_xs_vars == 'all':
-                        self.Xs_var_all[i].gradient[:] = 0
-                        self.Xs_var_all[i].gradient[:] = 0
-         # Nullify gradients for samples which are not in this minibatch <-  
             
         for i_seq in range(self.nSeq):
             if not self.minibatch_inference:
@@ -718,7 +755,7 @@ class Layer_new(SparseGP_MPI):
             
             # update gradients of initial parameters MLPs <-
     
-    def _encoder_update_initial_gradient(low_input, top_grad=None):
+    def _encoder_update_initial_gradient(self, low_input, top_grad=None):
         """
         This function computes the gradient wrt parameters of MLPs which
         encode initial values of Xs.

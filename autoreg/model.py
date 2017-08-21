@@ -77,7 +77,7 @@ class DeepAutoreg_new(Model):
 
         
         if minibatch_inference:
-            assert ((minibatch_inference != 'all') and (mb_inf_init_xs_means != 'all')) or ( mb_inf_tot_data_size is not None and mb_inf_sample_idxes is not None), "Total data size and initial indices must be provided"
+            assert (mb_inf_init_xs_means != 'all' and mb_inf_init_xs_vars != 'all') or ( mb_inf_tot_data_size is not None and mb_inf_sample_idxes is not None), "Total data size and initial indices must be provided"
             self.mb_inf_init_xs_means = mb_inf_init_xs_means
             self.mb_inf_init_xs_vars = mb_inf_init_xs_vars
             self.minibatch_inference = minibatch_inference
@@ -210,10 +210,8 @@ class DeepAutoreg_new(Model):
 
     def _next_minibatch(self):
         
-        idx = self.data_streamer.get_cur_index()
-        idx, samples_idxes, Ys_n, Us_n = self.data_streamer.next_minibatch()
-        
-        
+        batch_idx, prev_sample_ix = self.data_streamer.get_cur_index()
+        batch_idx, samples_idxes, Ys_n, Us_n = self.data_streamer.next_minibatch()
         # make U_pre_step shift ->
         Ys = []; Us = [];
         for i in range(len(Ys_n)):
@@ -259,29 +257,15 @@ class DeepAutoreg_new(Model):
             else: # Other layers
                 layer_Us = previous_layer.Xs_flat if (previous_layer is not None) else None
                 layer_Xs = Xs[i-1]
-
+            
+            #import pdb; pdb.set_trace()
             layer.set_inputs_and_outputs(len(Ys), Xs=layer_Xs, Us=layer_Us, samples_idxes=samples_idxes)
             previous_layer = layer
-
-
-        #import pdb; pdb.set_trace()
-        # !! It seems we can update Y, if we use encoder, because the rest will be recomputed automatically
-        #import pdb; pdb.set_trace()
-        
-        #self.layers[0].set_inputs_and_outputs(len(Ys), Xs=None, Us=Us, samples_idxes=samples_idxes) # top layer update
-        #self.layers[-1].set_inputs_and_outputs(len(Ys), Xs=Ys, Us=None, samples_idxes=samples_idxes) # bottom (observed) layer update
         
     def set_DataStreamer(self, data_streamer, back_cstr_initial="mlp"):
         from math import ceil
         self.data_streamer = data_streamer # this is an indicator of minibatch inference
         dataset_size = data_streamer.total_size
-        
-        
-        # set qU_ratio ->
-        qU_ratio = float(data_streamer.minibatch_size) / dataset_size
-        for l in self.layers:
-            l.qU_ratio = qU_ratio
-        # set qU_ratio <-
         
         if back_cstr_initial=="single": # single initial value for all subsequences (episodes). This is strange setting
             pass

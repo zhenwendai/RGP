@@ -88,7 +88,7 @@ class TrivialDataStreamer(DataStreamerTemplate):
         """
         """
         
-        return self.minibatch_index
+        return self.minibatch_index, range(self.minibatch_size)
     
     def minibatch_size(self, ):
         """
@@ -130,6 +130,7 @@ class RandomPermutationDataStreamer(DataStreamerTemplate):
         self.minibatch_size=len(Y)
         self.next_minibatch_start_idx = 0
         self.minibatch_index = 0
+        self.previous_indexes_out = None
         self.last_in_epoch = False
         
         self.Y = Y
@@ -161,6 +162,7 @@ class RandomPermutationDataStreamer(DataStreamerTemplate):
         
         
         rand_inds = random.sample(range(len(Y_out)),len(Y_out))
+        self.previous_indexes_out = rand_inds[:] # copying
         
         Y_out = [ Y_out[i] for i in rand_inds ]
         X_out = [ X_out[i] for i in rand_inds ]
@@ -177,7 +179,7 @@ class RandomPermutationDataStreamer(DataStreamerTemplate):
         """
         """
         
-        return self.minibatch_index
+        return self.minibatch_index, self.previous_indexes_out
     
     def minibatch_size(self, ):
         """
@@ -252,7 +254,7 @@ class StdMemoryDataStreamer(DataStreamerTemplate):
         Y_out = self.Y[st_idx:end_idx]
         X_out = self.X[st_idx:end_idx]
         indexes_out = range(st_idx,end_idx)
-        self.previous_indexes_out = indexes_out[:]
+        self.previous_indexes_out = indexes_out[:] # copying
         
         minibatch_index_out = self.minibatch_index
         
@@ -268,7 +270,7 @@ class StdMemoryDataStreamer(DataStreamerTemplate):
         """
         """
         
-        return self.minibatch_index
+        return self.minibatch_index, self.previous_indexes_out
     
     def minibatch_size(self, ):
         """
