@@ -415,7 +415,7 @@ class DeepAutoreg_rnn(Model):
         out_means, out_vars = self.encoder.forward_computation(  np.stack(self.Ys_all, axis=1)  )
         
         Xs = []
-        #import pdb; pdb.set_trace()
+        import pdb; pdb.set_trace()
         # iteration over layers (start from lower, observed is 0), inside each layer over i_seq
         for layer_idx in range(len(out_means)): # iteration over layers
             Xs_layer = []

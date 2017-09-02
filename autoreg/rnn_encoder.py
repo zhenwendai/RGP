@@ -236,11 +236,11 @@ class seq_encoder(Parameterized):
         
         # comp. from botton to top. Lists of computed means and vars from layers.
         self.forward_means_list, self.forward_vars_list = self.encoder.forward( l0_input )
-        
+        import pdb; pdb.set_trace()
         # Transformation to the required output form: list of lists of (sample size, dimensions). First list is 
         # over layers (starting from the one after the output), second list is over batch
-        out_means_list = [ [ ll.squeeze() for ll in np.split( pp.data.numpy().copy(), batch_size, axis=1) ] for pp in self.forward_means_list  ]
-        out_vars_list = [ [ ll.squeeze() for ll in np.split( pp.data.numpy().copy(), batch_size, axis=1) ] for pp in self.forward_vars_list  ]
+        out_means_list = [ [ ll.squeeze(axis=1) for ll in np.split( pp.data.numpy().copy(), batch_size, axis=1) ] for pp in self.forward_means_list  ]
+        out_vars_list = [ [ ll.squeeze(axis=1) for ll in np.split( pp.data.numpy().copy(), batch_size, axis=1) ] for pp in self.forward_vars_list  ]
         
         
         # return values are a list of lares outputs starting from the lower, the lowest one (output is excluded since it is only the ipnut layer)

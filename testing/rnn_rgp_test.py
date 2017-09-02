@@ -661,6 +661,6 @@ if __name__ == '__main__':
 #    tt1.test_perm_ds_two_minibatches()
 #    #tt.test_gradients()
 #    
-#    tt2 = Lstm_RGP_not_minibatch_Test('test_grad')
-#    tt2.setUp()
-#    tt2.test_grad()
+    tt2 = Lstm_RGP_not_minibatch_Test('test_grad')
+    tt2.setUp()
+    tt2.test_grad()
