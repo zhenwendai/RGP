@@ -889,9 +889,11 @@ class Layer_rnn(SparseGP_MPI):
         
         assert back_cstr==True, "Must be true for this model"
         #import pdb; pdb.set_trace()
-        if minibatch_inference:
+        if self.minibatch_inference:
             # set qU_ratio ->
             assert  mb_inf_sample_idxes is not None, "Need to provide ititial indixes"
+            assert  mb_inf_tot_data_size is not None, "Need to provide total data size"
+            
             qU_ratio = float( len(mb_inf_sample_idxes) ) / mb_inf_tot_data_size
             self.qU_ratio = qU_ratio
             # set qU_ratio <-
@@ -933,8 +935,8 @@ class Layer_rnn(SparseGP_MPI):
                 if self.minibatch_inference:
                     pass
                 else:
-                    self.link_parameters(*(self.init_Xs + self.Xs_var+[self.encoder]))
-                    
+                    #self.link_parameters(*(self.init_Xs + self.Xs_var+[self.encoder]))
+                    pass
             else:
                 self.link_parameters(*self.Xs_flat)
                 
@@ -952,10 +954,7 @@ class Layer_rnn(SparseGP_MPI):
         """
         
         #import pdb; pdb.set_trace()
-        
-        assert self.minibatch_inference, "This is developed and tested only for minibatch inference"
-        assert batch_size == len(samples_idxes), "Length must be correct"
-        
+    
         self.nSeq = batch_size # new batch size
 
         if self.withControl == (Us is not None): 
@@ -964,11 +963,16 @@ class Layer_rnn(SparseGP_MPI):
             pass
             #raise AssertionError("Us type must be preserved")
         
-        # set qU_ratio ->
-        qU_ratio = float( self.nSeq ) / self.mb_inf_tot_data_size
-        self.qU_ratio = qU_ratio
-        # set qU_ratio <-
-        
+        if self.minibatch_inference:
+            assert batch_size == len(samples_idxes), "Length must be correct"
+            
+            # set qU_ratio ->
+            qU_ratio = float( self.nSeq ) / self.mb_inf_tot_data_size
+            self.qU_ratio = qU_ratio
+            # set qU_ratio <-
+        else:
+            self.qU_ratio = 1
+            
         self.Xs_flat = Xs # From model encoder
         if self.X_observed:
             assert not isinstance(Xs[0], VariationalPosterior), "self.X_observed status must not change"

@@ -7,7 +7,10 @@ from GPy.core.parameterization.variational import VariationalPosterior,\
     NormalPosterior
 from .layers import Layer
 from .layers import Layer_new, Layer_rnn
-from .rnn_encoder import seq_encoder
+try:
+    from .rnn_encoder import seq_encoder
+except ImportError:
+    pass
 
 class DeepAutoreg_new(Model):
     """
@@ -349,20 +352,18 @@ class DeepAutoreg_rnn(Model):
         # Parameters which exist differently per layer but specified as single componenents are here expanded to each layer
         if not isinstance(num_inducing, list or tuple): num_inducing = [num_inducing]*self.nLayers
 
-        self.mb_inf_sample_idxes = mb_inf_sample_idxes
-        assert (minibatch_inference and inference_method=='svi' and back_cstr), "The model has been tested only with these settings!"
-        
-        assert len(self.mb_inf_sample_idxes) == len(self.Ys), "Sizes must be equal"
-        
-        
         if minibatch_inference:
+            assert len(mb_inf_sample_idxes) == len(self.Ys), "Sizes must be equal"
+            
+            self.mb_inf_sample_idxes = mb_inf_sample_idxes
             self.minibatch_inference = minibatch_inference
             self.mb_inf_tot_data_size = mb_inf_tot_data_size
             
             self.minibatch_size = len(self.mb_inf_sample_idxes) 
         else:
             self.minibatch_inference = False
-        
+            self.minibatch_size = len(self.Ys)
+            
         self.rnn_hidden_dims = rnn_hidden_dims
         self.encoder_rnn_type = rnn_type
         self.encoder_h0_type = 'zero'
@@ -500,7 +501,10 @@ class DeepAutoreg_rnn(Model):
                 layer_Xs = Xs[i-1]
             
             #import pdb; pdb.set_trace()
-            layer.set_inputs_and_outputs(len(self.Ys), Xs=layer_Xs, Us=layer_Us, samples_idxes=self.mb_inf_sample_idxes)
+            if self.minibatch_inference:
+                layer.set_inputs_and_outputs(len(self.Ys), Xs=layer_Xs, Us=layer_Us, samples_idxes=self.mb_inf_sample_idxes)
+            else:
+                layer.set_inputs_and_outputs(len(self.Ys), Xs=layer_Xs, Us=layer_Us, samples_idxes=None)
             previous_layer = layer
         # encoder generate hidden states ->
         
@@ -513,6 +517,7 @@ class DeepAutoreg_rnn(Model):
         [l.update_latent_gradients() for l in self.layers[::-1]] # start from lowest layer.
         
         
+        #import pdb; pdb.set_trace()
         # Update encoder parameters ->
         layer_list_means = [ [] for ll in range(self.nLayers-1) ]
         layer_list_vars = [ [] for ll in range(self.nLayers-1) ]
@@ -555,7 +560,7 @@ class DeepAutoreg_rnn(Model):
     
     @Model.optimizer_array.setter
     def optimizer_array(self, p):
-        if self.data_streamer is not None:
+        if (self.data_streamer is not None) and self.minibatch_inference:
             self._next_minibatch()
         Model.optimizer_array.fset(self, p)
 
@@ -594,6 +599,8 @@ class DeepAutoreg_rnn(Model):
         
     def set_DataStreamer(self, data_streamer, back_cstr_initial="mlp"):
         from math import ceil
+        assert self.minibatch_inference, "Datastreamer is supported only for minibatch inference."
+        
         self.data_streamer = data_streamer # this is an indicator of minibatch inference
         dataset_size = data_streamer.total_size
         

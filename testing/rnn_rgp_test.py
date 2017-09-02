@@ -36,7 +36,7 @@ def generate_data( seq_num, seq_length, u_dim = 1, y_dim = 1):
 
 class Rnn_RGP_Test(unittest.TestCase):
     """
-    Test the Deepautoreg_rnn model. Test rnn as a recognition model.
+    Test the Deepautoreg_rnn model (svi, minibatch, back_cstr). Test rnn as a recognition model.
     
     The test classes [ Rnn_RGP_Test, Lstm_RGP_Test, Gru_RGP_Test, Gru_bidirect_RGP_Test ],
     do exactly the same testing except the back constrain neural network is different for each of them.
@@ -169,7 +169,7 @@ class Rnn_RGP_Test(unittest.TestCase):
 
 class Lstm_RGP_Test(unittest.TestCase):
     """
-    Test the Deepautoreg_rnn model. Test rnn as a recognition model.
+    Test the Deepautoreg_rnn model (svi, minibatch, back_cstr). Test rnn as a recognition model.
     
     The test classes [ Rnn_RGP_Test, Lstm_RGP_Test, Gru_RGP_Test, Gru_bidirect_RGP_Test ],
     do exactly the same testing except the back constrain neural network is different for each of them.
@@ -302,7 +302,7 @@ class Lstm_RGP_Test(unittest.TestCase):
 
 class Gru_RGP_Test(unittest.TestCase):
     """
-    Test the Deepautoreg_rnn model. Test rnn as a recognition model.
+    Test the Deepautoreg_rnn model (svi, minibatch, back_cstr). Test rnn as a recognition model.
     
     The test classes [ Rnn_RGP_Test, Lstm_RGP_Test, Gru_RGP_Test, Gru_bidirect_RGP_Test ],
     do exactly the same testing except the back constrain neural network is different for each of them.
@@ -435,7 +435,7 @@ class Gru_RGP_Test(unittest.TestCase):
 
 class Gru_bidirect_RGP_Test(unittest.TestCase):
     """
-    Test the Deepautoreg_rnn model. Test rnn as a recognition model.
+    Test the Deepautoreg_rnn model (svi, minibatch, back_cstr). Test rnn as a recognition model.
     
     The test classes [ Rnn_RGP_Test, Lstm_RGP_Test, Gru_RGP_Test, Gru_bidirect_RGP_Test ],
     do exactly the same testing except the back constrain neural network is different for each of them.
@@ -568,6 +568,91 @@ class Gru_bidirect_RGP_Test(unittest.TestCase):
         np.testing.assert_equal( np.all( np.isclose(self.g_mll_2_1 + self.g_mll_2_2, self.g_mll_1_1, atol = 0, rtol = 1e-11)), True, err_msg="Likelihood gradients must be equal" )
 
 
+class Lstm_RGP_not_minibatch_Test(unittest.TestCase):
+    """
+    Test the Deepautoreg_rnn model (svi, minibatch=False, back_cstr). Test rnn as a recognition model.
+    
+    The test classes [ Rnn_RGP_Test, Lstm_RGP_Test, Gru_RGP_Test, Gru_bidirect_RGP_Test ],
+    do exactly the same testing except the back constrain neural network is different for each of them.
+    """
+    
+    def setUp(self):
+        
+        u_dim = 2
+        y_dim = 3
+        ts_length = 20
+        sequences_no = 3
+        #U, Y = generate_data( sequences_no, ts_length, u_dim = u_dim, y_dim = y_dim)
+        U_2, Y_2 = generate_data( sequences_no*2, ts_length, u_dim = u_dim, y_dim = y_dim)
+        
+        Q = 3 # 200 # Inducing points num. Take small number ofr speed
+        
+        back_cstr = True
+        inference_method = 'svi'
+        minibatch_inference = False
+        
+#        # 1 layer:
+#        win_out = 3
+#        win_in = 2
+#        wins = [0, win_out] # 0-th is output layer
+#        nDims = [y_dim,2]
+        
+        # 2 layers:
+        win_out = 3
+        win_in = 2
+        wins = [0, win_out, win_out]
+        nDims = [y_dim, 2,3] # 
+        
+        rnn_hidden_dims = [9,] # rnn hidden dimension
+        rnn_type='lstm'
+        rnn_bidirectional=False
+        rnn_h0_init='zero'
+        
+        #print("Input window:  ", win_in)
+        #print("Output window:  ", win_out)
+        
+        
+        m_1 = autoreg.DeepAutoreg_rnn(wins, Y_2, U=U_2, U_win=win_in,
+                                num_inducing=Q, back_cstr=back_cstr, nDims=nDims,
+                                
+                                rnn_hidden_dims=rnn_hidden_dims,
+                                rnn_type=rnn_type,
+                                rnn_bidirectional=rnn_bidirectional,
+                                rnn_h0_init=rnn_h0_init,
+                                
+                                inference_method=inference_method, # Inference method
+                                minibatch_inference = minibatch_inference,
+#                                # 1 layer:
+#                                kernels=[GPy.kern.RBF(win_out*nDims[1],ARD=True,inv_l=True),
+#                                         GPy.kern.RBF( (win_in + win_out) * nDims[1], ARD=True,inv_l=True)] )
+        
+                                 # 2 layers:
+                                kernels=[GPy.kern.RBF(win_out*nDims[1],ARD=True,inv_l=True),
+                                         GPy.kern.RBF(win_out*nDims[1] + win_out*nDims[2],ARD=True,inv_l=True),
+                                         GPy.kern.RBF(win_out*nDims[2] + win_in*u_dim,ARD=True,inv_l=True)])
+        
+        self.model_1 = m_1
+        self.model_1._trigger_params_changed()
+        
+        
+        self.mll_1_1 = float(self.model_1._log_marginal_likelihood)
+        #self.g_mll_1_1 = np.hstack( self.model_1[pp.replace(' ', '_')].gradient.flatten() for pp in self.model_1.parameter_names() if ('init_Xs' not in pp) and ('X_var' not in pp) ).copy()
+        self.g_mll_1_1 = self.model_1._log_likelihood_gradients().copy()
+        
+        self.model_1.checkgrad(verbose=False)
+        
+#        self.model_2 = copy.deepcopy(m_1)
+        
+        #self.model_1.optimize('bfgs',messages=1,max_iters=5)
+    
+    def test_grad(self,):
+        
+        #import pdb; pdb.set_trace()
+        
+        self.model_1.optimize('bfgs',messages=0,max_iters=5)
+        self.model_1.checkgrad(verbose=False)
+    
+
 if __name__ == '__main__':
     pass
 
@@ -576,6 +661,6 @@ if __name__ == '__main__':
 #    tt1.test_perm_ds_two_minibatches()
 #    #tt.test_gradients()
 #    
-    tt2 = Rnn_RGP_Test('test_perm_ds_sum_minibatches')
-    tt2.setUp()
-    tt2.test_perm_ds_two_minibatches()
+#    tt2 = Lstm_RGP_not_minibatch_Test('test_grad')
+#    tt2.setUp()
+#    tt2.test_grad()
