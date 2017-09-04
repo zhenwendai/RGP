@@ -325,26 +325,32 @@ class DeepAutoreg_rnn(Model):
             self.Us = []
             self.Ys = []
             self.Ys_all = []
+            self.Us_all = []
             for i in range(len(Ys)):
                 Y, U = Ys[i], Us[i]
 #                 assert Y.shape[0]==U.shape[0], "the signal and control should be aligned."
                 if self.U_pre_step:
-                    U = U[:-1].copy()
+                    U_t = U[:-1].copy()
                     Y_t = Y[U_win:].copy()
                 else:
                     Y_t = Y[U_win-1:].copy()
-                self.Us.append(NormalPosterior(U.copy(),np.ones(U.shape)*1e-10))
+                self.Us.append(NormalPosterior(U_t.copy(),np.ones(U_t.shape)*1e-10))
                 self.Ys.append(Y_t)
                 self.Ys_all.append(Y) # needed for encoder input
+                self.Us_all.append(U) # needed for encoder input
         else:
             self.Us = Us
             self.Ys = Ys
             self.Ys_all = Ys
+            self.Us_all = Us
         #import pdb; pdb.set_trace()
         
         #Xs = self._init_X(wins, self.Ys, self.Us, X_variance, init=init, nDims=self.nDims)
         
         assert back_cstr==True, "This is the typical situation for this model."
+        self.encode_include_input = True
+        
+        
         
         self.auto_update = False if inference_method=='svi' else True
         auto_update = self.auto_update
@@ -398,7 +404,12 @@ class DeepAutoreg_rnn(Model):
         """
         Init encoder
         """
-        self.encoder_input_dims = self.nDims[:-1]
+        if not self.encode_include_input:
+            self.encoder_input_dims = self.nDims[:-1]
+        else:
+            self.encoder_input_dims = [ii for ii in self.nDims[:-1] ]
+            self.encoder_input_dims[0] += self.Us_all[0].shape[1]
+            
         self.encoder_output_dims = self.nDims[1:]
         self.encoder_hidden_dim = self.rnn_hidden_dims[0] if self.rnn_hidden_dims is not None else 10
         
@@ -412,10 +423,13 @@ class DeepAutoreg_rnn(Model):
         """
         
         # stack batches over axis 1. This is required by pytorch.
-        out_means, out_vars = self.encoder.forward_computation(  np.stack(self.Ys_all, axis=1)  )
-        
+        if not self.encode_include_input:
+            out_means, out_vars = self.encoder.forward_computation(  np.stack(self.Ys_all, axis=1)  )
+        else:
+            out_means, out_vars = self.encoder.forward_computation(  np.stack(self.Ys_all, axis=1), np.stack(self.Us_all, axis=1)  )
+            
         Xs = []
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         # iteration over layers (start from lower, observed is 0), inside each layer over i_seq
         for layer_idx in range(len(out_means)): # iteration over layers
             Xs_layer = []
@@ -571,17 +585,18 @@ class DeepAutoreg_rnn(Model):
         batch_idx, prev_sample_ix = self.data_streamer.get_cur_index()
         batch_idx, samples_idxes, Ys_n, Us_n = self.data_streamer.next_minibatch()
         # make U_pre_step shift ->
-        Ys = []; Us = []; Ys_all = [];
+        Ys = []; Us = []; Ys_all = []; Us_all = [];
         for i in range(len(Ys_n)):
             Y, U = Ys_n[i], Us_n[i]
             if self.U_pre_step:
-                U = U[:-1].copy()
+                U_t = U[:-1].copy()
                 Y_t = Y[self.U_win:].copy()
             else:
                 Y_t = Y[self.U_win-1:].copy()
-                
+            
+            Us_all.append(U)
             Ys_all.append(Y)
-            Us.append(NormalPosterior(U,np.ones(U.shape)*1e-10))
+            Us.append( NormalPosterior(U_t,np.ones(U_t.shape)*1e-10) )
             Ys.append(Y_t)
         
         # make U_pre_step shift <-
@@ -589,7 +604,7 @@ class DeepAutoreg_rnn(Model):
         self.Us = Us
         self.Ys = Ys
         self.Ys_all = Ys_all
-        
+        self.Us_all = Us_all
         
         self.Us = Us
         self.Ys = Ys

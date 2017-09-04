@@ -215,7 +215,7 @@ class seq_encoder(Parameterized):
             gpy_param.gradient = pytorch_param_grad.copy()
         
         
-    def forward_computation(self, l0_input):
+    def forward_computation(self, l0_input, l0_input2=None):
         """
         Given the parameters of the neural networks computes outputs of each layer
         
@@ -223,6 +223,10 @@ class seq_encoder(Parameterized):
         ------------------
         l0_input: list
         list of size batch size, in each element the ndarray of shape (seq_len, input_dim)
+        
+        l0_input2: list
+        Another 0-th layer input (usually controls). They are to concatenated to the
+        foitst input.
         """
         #import pdb; pdb.set_trace()
         
@@ -231,12 +235,19 @@ class seq_encoder(Parameterized):
         self._zero_grads()
         self._params_from_gpy()
         
-        l0_input = Variable( torch.from_numpy(l0_input) ) # right shape: (seq_len, batch, hidden_size * num_directions) 
+        l0_input = torch.from_numpy(l0_input) # right shape: (seq_len, batch, input_dim) 
         
+        if l0_input2 is not None:
+            assert batch_size == l0_input2.shape[1], "Batch size must be the same"
+            assert l0_input.size()[0] == l0_input2.shape[0], "Sequaence lengths must be the same."
+            
+            l0_input = torch.cat( (l0_input, torch.from_numpy(l0_input2) ), dim=2 )
+        
+        l0_input = Variable( l0_input )
         
         # comp. from botton to top. Lists of computed means and vars from layers.
         self.forward_means_list, self.forward_vars_list = self.encoder.forward( l0_input )
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         # Transformation to the required output form: list of lists of (sample size, dimensions). First list is 
         # over layers (starting from the one after the output), second list is over batch
         out_means_list = [ [ ll.squeeze(axis=1) for ll in np.split( pp.data.numpy().copy(), batch_size, axis=1) ] for pp in self.forward_means_list  ]
