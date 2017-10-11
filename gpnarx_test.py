@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 from gpnarx import *
 import pylab as pb
 
@@ -37,7 +39,7 @@ Uts = uu[50:,:]
 # Train regression model
 m = GPy.models.SparseGPRegression(np.hstack((Xtr,Utr)),Ytr, num_inducing = num_inducing)
 m.optimize('bfgs', max_iters=1000, messages=True)
-print m
+print(m)
 
 # Initial window to kick-off free simulation
 x_start = Xts[0,:][:,None].T
@@ -53,7 +55,7 @@ pb.title('NARX-full')
 Xrand = np.random.randn(*Xtr.shape)
 mrandx = GPy.models.SparseGPRegression(np.hstack((Xrand,Utr)),Ytr, num_inducing = num_inducing)
 mrandx.optimize('bfgs', max_iters=1000, messages=True)
-print mrandx
+print(mrandx)
 
 # Free simulation
 ygp, varygp = gp_narx(mrandx, x_start, Yts.shape[0], Uts, ws)
@@ -67,7 +69,7 @@ pb.title('NARX-RAND_X')
 Urand = np.random.randn(*Utr.shape)
 mrandu = GPy.models.SparseGPRegression(np.hstack((Xtr,Urand)),Ytr, num_inducing = num_inducing)
 mrandu.optimize('bfgs', max_iters=1000, messages=True)
-print mrandu
+print(mrandu)
 
 # Free simulation
 ygp, varygp = gp_narx(mrandu, x_start, Yts.shape[0], Uts, ws)
@@ -80,7 +82,7 @@ pb.title('NARX-RAND_U')
 
 mrandxu = GPy.models.SparseGPRegression(np.hstack((Xrand,Urand)),Ytr, num_inducing = num_inducing)
 mrandxu.optimize('bfgs', max_iters=1000, messages=True)
-print mrandxu
+print(mrandxu)
 
 # Free simulation
 ygp, varygp = gp_narx(mrandxu, x_start, Yts.shape[0], Uts, ws)

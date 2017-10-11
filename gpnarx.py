@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import GPy
 import numpy as np
 
@@ -61,7 +63,7 @@ def gp_narx(m, x_start, N, Uts, ws, Ydebug=None):
         #print i, ': ', Y[i,:] , ' | var: ', varYpred  #####
 
         if Ydebug is not None:
-            print i, ': X=', str(curX.flatten()), 'U=', str(Uts[i,:].flatten()), 'Y=', str(Ydebug[i,:]) 
+            print(i, ': X=', str(curX.flatten()), 'U=', str(Uts[i,:].flatten()), 'Y=', str(Ydebug[i,:])) 
 
         if i == N-1:
             break
